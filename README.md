@@ -1,3 +1,2 @@
-# OVEL
+# Helios Lattice
 
-Ovel is a field of Zero
