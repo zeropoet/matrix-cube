@@ -1,0 +1,32 @@
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #000000;
+}
+
+canvas {
+    display: block;
+}
+
+ul li {
+    display: inline;
+    margin: 11px;
+}
+
+p {
+    font-family: monospace;
+    font-size: 17px;
+    color: #000000;
+}
+
+a  {
+    text-decoration: none;
+    color: #777777;
+}
+
+a:hover {
+    text-decoration: none;
+    color: #000000;
+}
