@@ -1,3 +1,4 @@
 # Helios Lattice
 
-The space where many coherent things are allowed to exist together.
+ØVEL inside the Jovian Helios Lattice (136-Cube)
+A three-dimensional resonance engine where every slice agrees with every other slice.
