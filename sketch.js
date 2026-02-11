@@ -10,7 +10,7 @@ let heliosMeta = {
 
 const TOTAL_VELA_COUNT = 212;
 const VELA_MASS_MIN = 1;
-const VELA_MASS_MAX = 42;
+const VELA_MASS_MAX = 100;
 const BACKGROUND_COLOR = [255, 50];
 const SUN_MASS = 100;
 const HELIOS_ROWS = 4;

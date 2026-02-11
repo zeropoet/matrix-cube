@@ -4,10 +4,10 @@ const SUN_ATTRACT_MAX_SQ = 10000000;
 const SUN_ATTRACT_G = 2;
 const SUN_INFLUENCE_RADIUS = 21;
 const SUN_MAX_RADIUS = 42;
-const SUN_MIN_RADIUS = 1;
-const SUN_FADE_MS = 10000;
+const SUN_MIN_RADIUS = 21;
+const SUN_FADE_MS = 100000;
 const SUN_SCALE_LERP = .7;
-const SUN_ALPHA_LERP = .08;
+const SUN_ALPHA_LERP = .8;
 
 class Vela {
   constructor(x, y, vx, vy, m, isSun = false, z = 0, vz = 0) {
@@ -102,8 +102,8 @@ class Vela {
   show() {
     if (this.isSun) {
       stroke(0, this.sunAlpha);
-      strokeWeight(1);
-      noFill();
+      strokeWeight(20);
+      //noFill();
     } else {
       fill(0);
     }
