@@ -1,4 +1,6 @@
 let heliosLattice = [];
+let heliosSystems = [];
+let velas = [];
 let cnv;
 let heliosMeta = {
   spacing: 1,
@@ -7,15 +9,14 @@ let heliosMeta = {
 };
 const TOTAL_VELA_COUNT = 212;
 const VELA_MASS_MIN = 1;
-const VELA_MASS_MAX = 100;
+const VELA_MASS_MAX = 42;
 const BACKGROUND_COLOR = [255, 50];
-const SUN_MASS = 10;
+const SUN_MASS = 100;
 const HELIOS_ROWS = 4;
 const HELIOS_COLS = 4;
 const HELIOS_DEPTH = 4;
-const HELIOS_YAW_SPEED = 0.0000012;
-const HELIOS_PITCH_SPEED = 0.00009;
-const VELA_COUNT_PER_SUN = Math.floor(TOTAL_VELA_COUNT / (HELIOS_ROWS * HELIOS_COLS));
+const HELIOS_YAW_SPEED = 0.000012;
+const HELIOS_PITCH_SPEED = 0.000009;
 
 
 function setup() {
@@ -28,26 +29,28 @@ function setup() {
   cnv.style('left', '0');
   cnv.style('pointer-events', 'none');
   background(255);
-  heliosLattice = createHeliosLattice(HELIOS_ROWS, HELIOS_COLS, HELIOS_DEPTH);
+  initializeHelios();
 }
 
 
 function draw() {
   background(...BACKGROUND_COLOR);
-  for (let layer of heliosLattice) {
-    for (let row of layer) {
-      for (let system of row) {
-        updateHeliosSystem(system);
-      }
-    }
-  }
+  updateHeliosPhysics();
+  drawHeliosSystems();
 }
 
 
 function windowResized() {
   applyPixelDensity();
   resizeCanvas(windowWidth, windowHeight);
+  initializeHelios();
+}
+
+function initializeHelios() {
   heliosLattice = createHeliosLattice(HELIOS_ROWS, HELIOS_COLS, HELIOS_DEPTH);
+  heliosSystems = flattenLattice(heliosLattice);
+  let spawnField = createWeightField(HELIOS_COLS, HELIOS_ROWS, HELIOS_DEPTH);
+  velas = createDistributedVelas(heliosLattice, spawnField, TOTAL_VELA_COUNT);
 }
 
 
@@ -79,7 +82,7 @@ function createHeliosLattice(rows, cols, depth) {
           w: spacing,
           h: spacing
         };
-        row.push(createHeliosSystem(bounds, VELA_COUNT_PER_SUN, sunX, sunY, z));
+        row.push(createHeliosSystem(bounds, sunX, sunY, z));
       }
       layer.push(row);
     }
@@ -88,21 +91,38 @@ function createHeliosLattice(rows, cols, depth) {
   return lattice;
 }
 
-function createHeliosSystem(bounds, velaCount, sunX, sunY, zIndex) {
-  let sun = new Vela(sunX, sunY, 0, 0, SUN_MASS, true);
-  let velas = [];
-  let weightField = createWeightField(4, 4, 4);
-  let voxelW = bounds.w / weightField.dims.x;
-  let voxelH = bounds.h / weightField.dims.y;
-  for (let i = 0; i < velaCount; i++) {
-    let voxel = pickWeightedVoxel(weightField);
-    let x = bounds.x + voxel.x * voxelW + random(voxelW);
-    let y = bounds.y + voxel.y * voxelH + random(voxelH);
-    let v = p5.Vector.random2D();
-    let m = random(VELA_MASS_MIN, VELA_MASS_MAX);
-    velas.push(new Vela(x, y, v.x, v.y, m));
+function createHeliosSystem(bounds, sunX, sunY, zIndex) {
+  let zWorld = (zIndex - heliosMeta.depthMid) * heliosMeta.spacing;
+  let sun = new Vela(sunX, sunY, 0, 0, SUN_MASS, true, zWorld, 0);
+  return { sun, bounds, zIndex, origin: { x: sunX, y: sunY, z: zWorld } };
+}
+
+function flattenLattice(lattice) {
+  let flat = [];
+  for (let layer of lattice) {
+    for (let row of layer) {
+      for (let system of row) {
+        flat.push(system);
+      }
+    }
   }
-  return { sun, velas, bounds, weightField, zIndex, origin: { x: sunX, y: sunY, z: zIndex } };
+  return flat;
+}
+
+function createDistributedVelas(lattice, field, count) {
+  let allVelas = [];
+  let zJitter = heliosMeta.spacing * 0.5;
+  for (let i = 0; i < count; i++) {
+    let voxel = pickWeightedVoxel(field);
+    let system = lattice[voxel.z][voxel.y][voxel.x];
+    let x = random(system.bounds.x, system.bounds.x + system.bounds.w);
+    let y = random(system.bounds.y, system.bounds.y + system.bounds.h);
+    let z = system.origin.z + random(-zJitter, zJitter);
+    let v = p5.Vector.random3D();
+    let m = random(VELA_MASS_MIN, VELA_MASS_MAX);
+    allVelas.push(new Vela(x, y, v.x, v.y, m, false, z, v.z));
+  }
+  return allVelas;
 }
 
 function createWeightField(xCount, yCount, zCount) {
@@ -139,40 +159,37 @@ function pickWeightedVoxel(field) {
   return { x: 0, y: 0, z: 0 };
 }
 
-function updateHeliosSystem(system) {
-  system.sun.beginSwell();
-  for (let vela of system.velas) {
-    system.sun.attract(vela);
-    for (let other of system.velas) {
+function updateHeliosPhysics() {
+  for (let system of heliosSystems) {
+    system.sun.beginSwell();
+  }
+
+  for (let vela of velas) {
+    for (let system of heliosSystems) {
+      system.sun.attract(vela);
+    }
+    for (let other of velas) {
       if (vela !== other) {
         vela.attract(other);
       }
     }
   }
-  system.sun.applySwell();
-  let transform = computeHeliosTransform(system);
-  push();
-  translate(transform.screenX, transform.screenY);
-  if (transform.scale !== 1) scale(transform.scale);
-  translate(-system.origin.x, -system.origin.y);
-  let prevAlpha = drawingContext.globalAlpha;
-  drawingContext.globalAlpha = prevAlpha * transform.alpha;
-  system.sun.show();
-  for (let vela of system.velas) {
-    vela.update();
-    vela.showTrail();
-    vela.show();
+
+  for (let system of heliosSystems) {
+    system.sun.applySwell();
   }
-  drawingContext.globalAlpha = prevAlpha;
-  pop();
+
+  for (let vela of velas) {
+    vela.update();
+  }
 }
 
-function computeHeliosTransform(system) {
+function projectWorldPoint(x, y, z) {
   let centerX = width / 2;
   let centerY = height / 2;
-  let x0 = system.origin.x - centerX;
-  let y0 = system.origin.y - centerY;
-  let z0 = (system.origin.z - heliosMeta.depthMid) * heliosMeta.spacing;
+  let x0 = x - centerX;
+  let y0 = y - centerY;
+  let z0 = z;
   let yaw = millis() * HELIOS_YAW_SPEED;
   let pitch = millis() * HELIOS_PITCH_SPEED;
   let cosY = Math.cos(yaw);
@@ -189,5 +206,59 @@ function computeHeliosTransform(system) {
   let screenX = centerX + x1 * perspective;
   let screenY = centerY + y2 * perspective;
   let alpha = constrain(1 - (z2 / (depthScale * 2.5)), 0.5, 1);
-  return { screenX, screenY, scale: perspective, alpha };
+  return { screenX, screenY, scale: perspective, alpha, depth: z2 };
+}
+
+function drawHeliosSystems() {
+  let renderables = [];
+
+  for (let system of heliosSystems) {
+    let projection = projectWorldPoint(system.sun.pos.x, system.sun.pos.y, system.sun.pos.z);
+    renderables.push({ body: system.sun, projection });
+  }
+
+  for (let vela of velas) {
+    drawProjectedTrail(vela);
+    let projection = projectWorldPoint(vela.pos.x, vela.pos.y, vela.pos.z);
+    renderables.push({ body: vela, projection });
+  }
+
+  renderables.sort((a, b) => a.projection.depth - b.projection.depth);
+  for (let entry of renderables) {
+    drawProjectedBody(entry.body, entry.projection);
+  }
+}
+
+function drawProjectedTrail(vela) {
+  let prevProjection = projectWorldPoint(vela.prev.x, vela.prev.y, vela.prev.z);
+  let currProjection = projectWorldPoint(vela.pos.x, vela.pos.y, vela.pos.z);
+  if (abs(currProjection.screenX - prevProjection.screenX) > width / 2) return;
+  if (abs(currProjection.screenY - prevProjection.screenY) > height / 2) return;
+  stroke(255, currProjection.alpha);
+  strokeWeight(100 * currProjection.scale);
+  line(
+    prevProjection.screenX,
+    prevProjection.screenY,
+    currProjection.screenX,
+    currProjection.screenY
+  );
+}
+
+function drawProjectedBody(body, projection) {
+  push();
+  translate(projection.screenX, projection.screenY);
+  if (projection.scale !== 1) scale(projection.scale);
+  let prevAlpha = drawingContext.globalAlpha;
+  drawingContext.globalAlpha = prevAlpha * projection.alpha;
+  if (body.isSun) {
+    stroke(0, body.sunAlpha);
+    strokeWeight(1);
+    noFill();
+  } else {
+    noStroke();
+    fill(0);
+  }
+  ellipse(0, 0, body.r * 2);
+  drawingContext.globalAlpha = prevAlpha;
+  pop();
 }

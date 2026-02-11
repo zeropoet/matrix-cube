@@ -1,20 +1,20 @@
 const SUN_SCALE = 1;
-const SUN_ATTRACT_MIN_SQ = 10000;
-const SUN_ATTRACT_MAX_SQ = 100000;
+const SUN_ATTRACT_MIN_SQ = 1000000;
+const SUN_ATTRACT_MAX_SQ = 10000000;
 const SUN_ATTRACT_G = 2;
-const SUN_INFLUENCE_RADIUS = 10;
-const SUN_MAX_RADIUS = 50;
+const SUN_INFLUENCE_RADIUS = 21;
+const SUN_MAX_RADIUS = 42;
 const SUN_MIN_RADIUS = 1;
 const SUN_FADE_MS = 10000;
-const SUN_SCALE_LERP = .07;
-const SUN_ALPHA_LERP = .008;
+const SUN_SCALE_LERP = .7;
+const SUN_ALPHA_LERP = .08;
 
 class Vela {
-  constructor(x, y, vx, vy, m, isSun = false) {
-    this.pos = createVector(x, y);
+  constructor(x, y, vx, vy, m, isSun = false, z = 0, vz = 0) {
+    this.pos = createVector(x, y, z);
     this.prev = this.pos.copy();
-    this.vel = createVector(vx, vy);
-    this.acc = createVector(0, 0);
+    this.vel = createVector(vx, vy, vz);
+    this.acc = createVector(0, 0, 0);
     this.baseMass = m;
     this.mass = m;
     this.baseR = sqrt(this.baseMass) * (isSun ? SUN_SCALE : 1);
