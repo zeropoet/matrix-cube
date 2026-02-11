@@ -17,6 +17,9 @@ const HELIOS_COLS = 4;
 const HELIOS_DEPTH = 4;
 const HELIOS_YAW_SPEED = 0.000012;
 const HELIOS_PITCH_SPEED = 0.000009;
+const VELA_NEIGHBOR_RADIUS = 280;
+const VELA_NEIGHBOR_RADIUS_SQ = VELA_NEIGHBOR_RADIUS * VELA_NEIGHBOR_RADIUS;
+const VELA_HASH_CELL_SIZE = VELA_NEIGHBOR_RADIUS;
 
 
 function setup() {
@@ -160,6 +163,8 @@ function pickWeightedVoxel(field) {
 }
 
 function updateHeliosPhysics() {
+  let spatialGrid = buildVelaSpatialGrid(velas, VELA_HASH_CELL_SIZE);
+
   for (let system of heliosSystems) {
     system.sun.beginSwell();
   }
@@ -168,8 +173,9 @@ function updateHeliosPhysics() {
     for (let system of heliosSystems) {
       system.sun.attract(vela);
     }
-    for (let other of velas) {
-      if (vela !== other) {
+    let neighbors = findNearbyVelas(vela, spatialGrid, VELA_HASH_CELL_SIZE);
+    for (let other of neighbors) {
+      if (vela !== other && squaredDistance3D(vela.pos, other.pos) <= VELA_NEIGHBOR_RADIUS_SQ) {
         vela.attract(other);
       }
     }
@@ -182,6 +188,55 @@ function updateHeliosPhysics() {
   for (let vela of velas) {
     vela.update();
   }
+}
+
+function buildVelaSpatialGrid(items, cellSize) {
+  let grid = new Map();
+  for (let body of items) {
+    let key = hashGridCell(body.pos.x, body.pos.y, body.pos.z, cellSize);
+    if (!grid.has(key)) {
+      grid.set(key, []);
+    }
+    grid.get(key).push(body);
+  }
+  return grid;
+}
+
+function findNearbyVelas(vela, grid, cellSize) {
+  let results = [];
+  let baseX = Math.floor(vela.pos.x / cellSize);
+  let baseY = Math.floor(vela.pos.y / cellSize);
+  let baseZ = Math.floor(vela.pos.z / cellSize);
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        let key = gridCellKey(baseX + dx, baseY + dy, baseZ + dz);
+        let cellItems = grid.get(key);
+        if (cellItems) {
+          results.push(...cellItems);
+        }
+      }
+    }
+  }
+  return results;
+}
+
+function hashGridCell(x, y, z, cellSize) {
+  let gx = Math.floor(x / cellSize);
+  let gy = Math.floor(y / cellSize);
+  let gz = Math.floor(z / cellSize);
+  return gridCellKey(gx, gy, gz);
+}
+
+function gridCellKey(gx, gy, gz) {
+  return `${gx},${gy},${gz}`;
+}
+
+function squaredDistance3D(a, b) {
+  let dx = a.x - b.x;
+  let dy = a.y - b.y;
+  let dz = a.z - b.z;
+  return dx * dx + dy * dy + dz * dz;
 }
 
 function projectWorldPoint(x, y, z) {
