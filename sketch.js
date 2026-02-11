@@ -7,6 +7,7 @@ let heliosMeta = {
   depthMid: 1,
   depthScale: 1
 };
+
 const TOTAL_VELA_COUNT = 212;
 const VELA_MASS_MIN = 1;
 const VELA_MASS_MAX = 42;
@@ -21,7 +22,6 @@ const VELA_NEIGHBOR_RADIUS = 280;
 const VELA_NEIGHBOR_RADIUS_SQ = VELA_NEIGHBOR_RADIUS * VELA_NEIGHBOR_RADIUS;
 const VELA_HASH_CELL_SIZE = VELA_NEIGHBOR_RADIUS;
 
-
 function setup() {
   applyPixelDensity();
   cnv = createCanvas(windowWidth, windowHeight);
@@ -35,13 +35,11 @@ function setup() {
   initializeHelios();
 }
 
-
 function draw() {
   background(...BACKGROUND_COLOR);
   updateHeliosPhysics();
   drawHeliosSystems();
 }
-
 
 function windowResized() {
   applyPixelDensity();
@@ -55,7 +53,6 @@ function initializeHelios() {
   let spawnField = createWeightField(HELIOS_COLS, HELIOS_ROWS, HELIOS_DEPTH);
   velas = createDistributedVelas(heliosLattice, spawnField, TOTAL_VELA_COUNT);
 }
-
 
 function applyPixelDensity() {
   const dpr = window.devicePixelRatio || 1;

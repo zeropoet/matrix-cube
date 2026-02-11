@@ -62,7 +62,6 @@ class Vela {
     }
   }
 
-
   applySwell() {
     if (!this.isSun) return;
     if (this.influencedThisFrame) {
@@ -85,14 +84,12 @@ class Vela {
     }
   }
 
-
   update() {
     this.prev.set(this.pos);
     this.vel.add(this.acc);
     this.pos.add(this.vel);
     this.acc.set(0, 0);
   }
-
 
   showTrail() {
     if (abs(this.pos.x - this.prev.x) > width / 2) return;
@@ -101,7 +98,6 @@ class Vela {
     strokeWeight(100);
     line(this.prev.x, this.prev.y, this.pos.x, this.pos.y);
   }
-
 
   show() {
     if (this.isSun) {
