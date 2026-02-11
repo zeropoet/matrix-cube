@@ -305,7 +305,7 @@ function drawProjectedBody(body, projection) {
   if (body.isSun) {
     stroke(0, body.sunAlpha);
     strokeWeight(1);
-    noFill();
+    //noFill();
   } else {
     noStroke();
     fill(0);
