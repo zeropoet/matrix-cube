@@ -1,14 +1,16 @@
-const SUN_SCALE = .01;
+const SUN_SCALE = 1;
 const SUN_ATTRACT_MIN_SQ = 1000000;
 const SUN_ATTRACT_MAX_SQ = 10000000;
-const SUN_ATTRACT_G = 1;
+const SUN_ATTRACT_G = 10;
 const SUN_INFLUENCE_RADIUS = 100;
 const SUN_MAX_RADIUS = 10;
 const SUN_MIN_RADIUS = 5;
-const SUN_FADE_MS = 1000;
+const SUN_FADE_MS = 100;
 const SUN_SCALE_LERP = 1.7;
 const SUN_ALPHA_LERP = .008;
 const VELA_FORCE_WARMUP_FRAMES = 220;
+const VELA_TURN_SMOOTHING = .1;
+const VELA_VELOCITY_DAMPING = 1;
 
 class Vela {
   constructor(x, y, vx, vy, m, isSun = false, z = 0, vz = 0, polarity = 1) {
@@ -28,7 +30,6 @@ class Vela {
     this.wasInfluenced = false;
     this.exitStartMs = 0;
     this.exitStartR = this.r;
-    this.exitStartMass = this.mass;
     this.sunAlpha = 255;
     this.ageFrames = 0;
   }
@@ -84,7 +85,6 @@ class Vela {
       if (this.wasInfluenced) {
         this.exitStartMs = millis();
         this.exitStartR = this.r;
-        this.exitStartMass = this.mass;
         this.wasInfluenced = false;
       }
       let t = constrain((millis() - this.exitStartMs) / SUN_FADE_MS, 0, 1);
@@ -96,28 +96,11 @@ class Vela {
 
   update() {
     this.prev.set(this.pos);
-    this.vel.add(this.acc);
+    let desiredVel = p5.Vector.add(this.vel, this.acc);
+    this.vel.lerp(desiredVel, VELA_TURN_SMOOTHING);
+    this.vel.mult(VELA_VELOCITY_DAMPING);
     this.pos.add(this.vel);
     this.acc.set(0, 0);
     this.ageFrames++;
-  }
-
-  showTrail() {
-    if (abs(this.pos.x - this.prev.x) > width / 2) return;
-    if (abs(this.pos.y - this.prev.y) > height / 2) return;
-    stroke(255, 10);
-    strokeWeight(100);
-    line(this.prev.x, this.prev.y, this.pos.x, this.pos.y);
-  }
-
-  show() {
-    if (this.isSun) {
-      stroke(0, this.sunAlpha);
-      strokeWeight(20);
-      //noFill();
-    } else {
-      fill(0);
-    }
-    ellipse(this.pos.x, this.pos.y, this.r * 2);
   }
 }

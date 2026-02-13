@@ -11,40 +11,43 @@ let heliosMeta = {
 };
 
 const TOTAL_VELA_COUNT = 212;
-const VELA_MASS_MIN = 100;
-const VELA_MASS_MAX = 1000;
-const BACKGROUND_COLOR = [255, 8];
+const VELA_MASS_MIN = 5;
+const VELA_MASS_MAX = 10;
+const BACKGROUND_COLOR = [0, 10];
 const SUN_MASS = 1;
 const HELIOS_ROWS = 4;
 const HELIOS_COLS = 4;
 const HELIOS_DEPTH = 4;
-const HELIOS_YAW_SPEED = 0.00012;
-const HELIOS_PITCH_SPEED = 0.00009;
+const HELIOS_YAW_SPEED = 0.000045;
+const HELIOS_PITCH_SPEED = 0.00003;
 const VELA_NEIGHBOR_RADIUS = 100;
 const VELA_NEIGHBOR_RADIUS_SQ = VELA_NEIGHBOR_RADIUS * VELA_NEIGHBOR_RADIUS;
 const VELA_HASH_CELL_SIZE = VELA_NEIGHBOR_RADIUS;
 const SUN_FIELD_FALLOFF = 0.00002;
-const SUN_MAGNETIC_PULL = 5;
+const SUN_FORCE_SCALE = 0.42;
+const SUN_MAGNETIC_PULL = 2.6;
 const SUN_MAGNETIC_BIAS = 0.55;
 const SUN_MAGNETIC_SIGN = 0.75;
-const SUN_TUBE_PULL = 2.5;
-const SUN_SWIRL_STRENGTH = 1.8;
-const SUN_BRIDGE_FLOW = 1.5;
-const MATRIX_NODE_LOCK = 2.8;
-const MATRIX_AXIS_LOCK = 2.2;
-const MATRIX_LAYER_LOCK = 3.1;
-const MATRIX_CAGE_STIFFNESS = 0.04;
-const MATRIX_CAGE_MARGIN = 0.42;
+const SUN_TUBE_PULL = 1.0;
+const SUN_SWIRL_STRENGTH = 0.8;
+const SUN_BRIDGE_FLOW = 0.68;
+const MATRIX_FORCE_SCALE = 0.32;
+const MATRIX_NODE_LOCK = 1.0;
+const MATRIX_AXIS_LOCK = 0.7;
+const MATRIX_LAYER_LOCK = 1.0;
+const MATRIX_CAGE_STIFFNESS = 0.01;
+const MATRIX_CAGE_MARGIN = 0.62;
 const TRAIL_TARGET_PX = 1;
 const TRAIL_MAX_PX = 1.5;
 const TRAIL_SPEED_FOR_MAX = 24;
 const TRAIL_WIDTH_LERP = 0.34;
 const TRAIL_ALPHA = 120;
-const VELA_INITIAL_SPEED = 0.12;
+const VELA_INITIAL_SPEED = .12;
 
 function setup() {
   applyPixelDensity();
   cnv = createCanvas(windowWidth, windowHeight);
+  strokeCap(ROUND);
   cnv.position(0, 0);
   cnv.style('z-index', '0');
   cnv.style('position', 'fixed');
@@ -245,7 +248,7 @@ function applySunLensingForce(vela) {
   let nearestStrength = SUN_MAGNETIC_PULL / (1 + nearestSq * SUN_FIELD_FALLOFF);
   let poleMatch = vela.polarity * nearest.polarity;
   let magneticScale = SUN_MAGNETIC_BIAS + (poleMatch < 0 ? SUN_MAGNETIC_SIGN : -SUN_MAGNETIC_SIGN);
-  toNearest.setMag(nearestStrength * magneticScale);
+  toNearest.setMag(nearestStrength * magneticScale * SUN_FORCE_SCALE);
   vela.applyForce(toNearest);
 
   if (!second) {
@@ -268,7 +271,7 @@ function applySunLensingForce(vela) {
 
   if (tubeVector.magSq() > 0) {
     let pairOpposite = nearest.polarity * second.polarity < 0;
-    let tubeStrength = SUN_TUBE_PULL * lens * (pairOpposite ? 1.2 : 0.55);
+    let tubeStrength = SUN_TUBE_PULL * lens * (pairOpposite ? 1.2 : 0.55) * SUN_FORCE_SCALE;
     tubeVector.setMag(tubeStrength);
     vela.applyForce(tubeVector);
   }
@@ -281,7 +284,7 @@ function applySunLensingForce(vela) {
     if (swirl.magSq() > 0) {
       let centerBoost = 1 - abs(t - 0.5) * 2;
       let swirlSign = nearest.polarity * second.polarity * vela.polarity;
-      swirl.setMag(SUN_SWIRL_STRENGTH * lens * centerBoost * swirlSign);
+      swirl.setMag(SUN_SWIRL_STRENGTH * lens * centerBoost * swirlSign * SUN_FORCE_SCALE);
       vela.applyForce(swirl);
     }
   }
@@ -289,7 +292,7 @@ function applySunLensingForce(vela) {
   let distA = sqrt(nearestSq);
   let distB = sqrt(secondSq);
   let handoff = (distA - distB) / max(distA + distB, 0.0001);
-  let bridgeFlow = bridgeDir.mult(-handoff * SUN_BRIDGE_FLOW * lens);
+  let bridgeFlow = bridgeDir.mult(-handoff * SUN_BRIDGE_FLOW * lens * SUN_FORCE_SCALE);
   vela.applyForce(bridgeFlow);
 
   applyMatrixConfinementForce(vela, nearest, nearestSq);
@@ -307,7 +310,7 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq) {
 
   let nodePull = p5.Vector.sub(nearestSystem.sun.pos, vela.pos);
   if (nodePull.magSq() > 0) {
-    let nodeStrength = MATRIX_NODE_LOCK / (1 + nearestSq * SUN_FIELD_FALLOFF * 1.5);
+    let nodeStrength = (MATRIX_NODE_LOCK / (1 + nearestSq * SUN_FIELD_FALLOFF * 1.5)) * MATRIX_FORCE_SCALE;
     nodePull.setMag(nodeStrength);
     vela.applyForce(nodePull);
   }
@@ -316,13 +319,13 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq) {
   let axisPull = p5.Vector.sub(axisTarget, vela.pos);
   let axisSq = axisPull.magSq();
   if (axisSq > 0) {
-    let axisStrength = MATRIX_AXIS_LOCK / (1 + axisSq * SUN_FIELD_FALLOFF * 1.5);
+    let axisStrength = (MATRIX_AXIS_LOCK / (1 + axisSq * SUN_FIELD_FALLOFF * 1.5)) * MATRIX_FORCE_SCALE;
     axisPull.setMag(axisStrength);
     vela.applyForce(axisPull);
   }
 
   let layerDelta = gridZ - vela.pos.z;
-  vela.applyForce(createVector(0, 0, layerDelta * MATRIX_LAYER_LOCK * 0.02));
+  vela.applyForce(createVector(0, 0, layerDelta * MATRIX_LAYER_LOCK * 0.02 * MATRIX_FORCE_SCALE));
 
   let minX = heliosMeta.startX - spacing * MATRIX_CAGE_MARGIN;
   let maxX = heliosMeta.startX + spacing * (HELIOS_COLS - 1 + MATRIX_CAGE_MARGIN);
@@ -338,7 +341,10 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq) {
   if (vela.pos.y > maxY) cageForce.y -= (vela.pos.y - maxY) * MATRIX_CAGE_STIFFNESS;
   if (vela.pos.z < minZ) cageForce.z += (minZ - vela.pos.z) * MATRIX_CAGE_STIFFNESS;
   if (vela.pos.z > maxZ) cageForce.z -= (vela.pos.z - maxZ) * MATRIX_CAGE_STIFFNESS;
-  if (cageForce.magSq() > 0) vela.applyForce(cageForce);
+  if (cageForce.magSq() > 0) {
+    cageForce.mult(MATRIX_FORCE_SCALE);
+    vela.applyForce(cageForce);
+  }
 }
 
 function nearestGridValue(value, start, step, count) {
@@ -475,12 +481,12 @@ function drawProjectedBody(body, projection) {
   let prevAlpha = drawingContext.globalAlpha;
   drawingContext.globalAlpha = prevAlpha * projection.alpha;
   if (body.isSun) {
-    stroke(0, body.sunAlpha);
+    stroke(255, body.sunAlpha);
     strokeWeight(1);
     //noFill();
   } else {
     noStroke();
-    fill(0);
+    fill(255);
   }
   ellipse(0, 0, body.r * 2);
   drawingContext.globalAlpha = prevAlpha;
