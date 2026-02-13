@@ -1,16 +1,17 @@
-const SUN_SCALE = 1;
+const SUN_SCALE = .01;
 const SUN_ATTRACT_MIN_SQ = 1000000;
 const SUN_ATTRACT_MAX_SQ = 10000000;
-const SUN_ATTRACT_G = 2;
-const SUN_INFLUENCE_RADIUS = 21;
-const SUN_MAX_RADIUS = 42;
-const SUN_MIN_RADIUS = 21;
-const SUN_FADE_MS = 100000;
-const SUN_SCALE_LERP = .7;
-const SUN_ALPHA_LERP = .8;
+const SUN_ATTRACT_G = 1;
+const SUN_INFLUENCE_RADIUS = 100;
+const SUN_MAX_RADIUS = 10;
+const SUN_MIN_RADIUS = 5;
+const SUN_FADE_MS = 1000;
+const SUN_SCALE_LERP = 1.7;
+const SUN_ALPHA_LERP = .008;
+const VELA_FORCE_WARMUP_FRAMES = 220;
 
 class Vela {
-  constructor(x, y, vx, vy, m, isSun = false, z = 0, vz = 0) {
+  constructor(x, y, vx, vy, m, isSun = false, z = 0, vz = 0, polarity = 1) {
     this.pos = createVector(x, y, z);
     this.prev = this.pos.copy();
     this.vel = createVector(vx, vy, vz);
@@ -20,6 +21,7 @@ class Vela {
     this.baseR = sqrt(this.baseMass) * (isSun ? SUN_SCALE : 1);
     this.r = this.baseR;
     this.isSun = isSun;
+    this.polarity = polarity;
     this.swell = 0;
     this.massSwell = 0;
     this.influencedThisFrame = false;
@@ -28,6 +30,7 @@ class Vela {
     this.exitStartR = this.r;
     this.exitStartMass = this.mass;
     this.sunAlpha = 255;
+    this.ageFrames = 0;
   }
 
   beginSwell() {
@@ -38,6 +41,11 @@ class Vela {
   }
 
   applyForce(force) {
+    if (!this.isSun && this.ageFrames < VELA_FORCE_WARMUP_FRAMES) {
+      let t = this.ageFrames / VELA_FORCE_WARMUP_FRAMES;
+      let eased = t * t * (3 - 2 * t);
+      force = p5.Vector.mult(force, eased);
+    }
     let f = p5.Vector.div(force, this.mass);
     this.acc.add(f);
   }
@@ -49,16 +57,18 @@ class Vela {
     let strength = ((this.mass * vela.mass) / distanceSq) * SUN_ATTRACT_G;
     force.setMag(strength);
     vela.applyForce(force);
+    this.registerInfluence(rawDistanceSq, vela.mass);
+  }
 
-    if (this.isSun) {
-      let d = sqrt(rawDistanceSq);
-      let t = 1 - d / SUN_INFLUENCE_RADIUS;
-      t = constrain(t, 0, 1);
-      if (t > 0) {
-        this.swell += vela.mass;
-        this.massSwell += vela.mass;
-        this.influencedThisFrame = true;
-      }
+  registerInfluence(rawDistanceSq, sourceMass) {
+    if (!this.isSun) return;
+    let d = sqrt(rawDistanceSq);
+    let t = 1 - d / SUN_INFLUENCE_RADIUS;
+    t = constrain(t, 0, 1);
+    if (t > 0) {
+      this.swell += sourceMass;
+      this.massSwell += sourceMass;
+      this.influencedThisFrame = true;
     }
   }
 
@@ -89,12 +99,13 @@ class Vela {
     this.vel.add(this.acc);
     this.pos.add(this.vel);
     this.acc.set(0, 0);
+    this.ageFrames++;
   }
 
   showTrail() {
     if (abs(this.pos.x - this.prev.x) > width / 2) return;
     if (abs(this.pos.y - this.prev.y) > height / 2) return;
-    stroke(255, 1);
+    stroke(255, 10);
     strokeWeight(100);
     line(this.prev.x, this.prev.y, this.pos.x, this.pos.y);
   }
