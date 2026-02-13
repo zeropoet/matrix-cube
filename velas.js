@@ -51,11 +51,11 @@ class Vela {
     this.acc.add(f);
   }
 
-  attract(vela) {
+  attract(vela, strengthScale = 1) {
     let force = p5.Vector.sub(this.pos, vela.pos);
     let rawDistanceSq = force.magSq();
     let distanceSq = constrain(rawDistanceSq, SUN_ATTRACT_MIN_SQ, SUN_ATTRACT_MAX_SQ);
-    let strength = ((this.mass * vela.mass) / distanceSq) * SUN_ATTRACT_G;
+    let strength = (((this.mass * vela.mass) / distanceSq) * SUN_ATTRACT_G) * strengthScale;
     force.setMag(strength);
     vela.applyForce(force);
     this.registerInfluence(rawDistanceSq, vela.mass);
@@ -94,13 +94,14 @@ class Vela {
     }
   }
 
-  update() {
+  update(timeScale = 1) {
     this.prev.set(this.pos);
-    let desiredVel = p5.Vector.add(this.vel, this.acc);
+    let scaledAcc = p5.Vector.mult(this.acc, timeScale);
+    let desiredVel = p5.Vector.add(this.vel, scaledAcc);
     this.vel.lerp(desiredVel, VELA_TURN_SMOOTHING);
     this.vel.mult(VELA_VELOCITY_DAMPING);
-    this.pos.add(this.vel);
+    this.pos.add(p5.Vector.mult(this.vel, timeScale));
     this.acc.set(0, 0);
-    this.ageFrames++;
+    this.ageFrames += timeScale;
   }
 }

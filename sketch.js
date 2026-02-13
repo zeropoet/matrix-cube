@@ -1,6 +1,7 @@
 let heliosLattice = [];
 let heliosSystems = [];
 let velas = [];
+let velaRelations = [];
 let cnv;
 let heliosMeta = {
   spacing: 1,
@@ -18,11 +19,24 @@ const SUN_MASS = 1;
 const HELIOS_ROWS = 4;
 const HELIOS_COLS = 4;
 const HELIOS_DEPTH = 4;
+const TIME_SPEED_FACTOR = 0.25;
 const HELIOS_YAW_SPEED = 0.000045;
 const HELIOS_PITCH_SPEED = 0.00003;
 const VELA_NEIGHBOR_RADIUS = 100;
 const VELA_NEIGHBOR_RADIUS_SQ = VELA_NEIGHBOR_RADIUS * VELA_NEIGHBOR_RADIUS;
 const VELA_HASH_CELL_SIZE = VELA_NEIGHBOR_RADIUS;
+const VELA_RELATION_RADIUS = 130;
+const VELA_RELATION_RADIUS_SQ = VELA_RELATION_RADIUS * VELA_RELATION_RADIUS;
+const VELA_RELATION_MAX_TOTAL = 2200;
+const VELA_RELATION_MIN_STRENGTH = 0.08;
+const VELA_RELATION_SPRING = .035;
+const VELA_RELATION_TARGET_DISTANCE = 42;
+const VELA_RELATION_TARGET_SWING = 26;
+const VELA_RELATION_BRAID_FORCE = 0.018;
+const VELA_RELATION_LINE_ALPHA = 170;
+const VELA_RELATION_PULSE_RATE = 0.0055;
+const VELA_RELATION_PHASE_RATE = 0.0027;
+const VELA_RELATION_DRAW_MAX_LENGTH = 22;
 const SUN_FIELD_FALLOFF = 0.00002;
 const SUN_FORCE_SCALE = 0.42;
 const SUN_MAGNETIC_PULL = 2.6;
@@ -37,12 +51,23 @@ const MATRIX_AXIS_LOCK = 0.7;
 const MATRIX_LAYER_LOCK = 1.0;
 const MATRIX_CAGE_STIFFNESS = 0.01;
 const MATRIX_CAGE_MARGIN = 0.62;
+const QUANTUM_REORIENTATION_STRENGTH = .8;
+const QUANTUM_REORIENTATION_RATE = 0.0016;
+const QUANTUM_POLARITY_PHASE = 1.0472;
 const TRAIL_TARGET_PX = 1;
 const TRAIL_MAX_PX = 1.5;
 const TRAIL_SPEED_FOR_MAX = 24;
 const TRAIL_WIDTH_LERP = 0.34;
 const TRAIL_ALPHA = 120;
-const VELA_INITIAL_SPEED = .12;
+const VELA_INITIAL_SPEED = 1.12;
+const TIME_SPEED_PRESETS = [0.25, 0.72, 1.5];
+const QUANTUM_STRENGTH_OFF = 0;
+const QUANTUM_STRENGTH_ON = 10.8;
+
+let runtimeTimeSpeed = TIME_SPEED_FACTOR;
+let runtimeQuantumStrength = QUANTUM_REORIENTATION_STRENGTH;
+let quantumIsolationMode = false;
+let timePresetIndex = 0;
 
 function setup() {
   applyPixelDensity();
@@ -196,20 +221,42 @@ function pickWeightedVoxel(field) {
 }
 
 function updateHeliosPhysics() {
+  let timeScale = simulationTimeScale();
   let spatialGrid = buildVelaSpatialGrid(velas, VELA_HASH_CELL_SIZE);
+  let indexByVela = new Map();
+  let seenPairs = new Set();
+  velaRelations = [];
+  for (let i = 0; i < velas.length; i++) {
+    indexByVela.set(velas[i], i);
+  }
 
   for (let system of heliosSystems) {
     system.sun.beginSwell();
   }
 
-  for (let vela of velas) {
-    applySunLensingForce(vela);
-    let neighbors = findNearbyVelas(vela, spatialGrid, VELA_HASH_CELL_SIZE);
-    for (let other of neighbors) {
-      if (vela !== other && squaredDistance3D(vela.pos, other.pos) <= VELA_NEIGHBOR_RADIUS_SQ) {
-        vela.attract(other);
+  for (let i = 0; i < velas.length; i++) {
+    let vela = velas[i];
+    applySunLensingForce(vela, timeScale, !quantumIsolationMode);
+    if (!quantumIsolationMode) {
+      let neighbors = findNearbyVelas(vela, spatialGrid, VELA_HASH_CELL_SIZE);
+      for (let other of neighbors) {
+        let dSq = squaredDistance3D(vela.pos, other.pos);
+        if (vela !== other && dSq <= VELA_NEIGHBOR_RADIUS_SQ) {
+          vela.attract(other, timeScale);
+        }
+        if (vela !== other && dSq <= VELA_RELATION_RADIUS_SQ) {
+          let j = indexByVela.get(other);
+          if (j !== undefined && j > i) {
+            registerVelaRelation(vela, other, dSq, timeScale, seenPairs, i, j);
+          }
+        }
       }
     }
+  }
+
+  if (velaRelations.length > VELA_RELATION_MAX_TOTAL) {
+    velaRelations.sort((a, b) => b.strength - a.strength);
+    velaRelations = velaRelations.slice(0, VELA_RELATION_MAX_TOTAL);
   }
 
   for (let system of heliosSystems) {
@@ -217,11 +264,11 @@ function updateHeliosPhysics() {
   }
 
   for (let vela of velas) {
-    vela.update();
+    vela.update(timeScale);
   }
 }
 
-function applySunLensingForce(vela) {
+function applySunLensingForce(vela, timeScale = 1, enableConfinement = true) {
   let nearest = null;
   let second = null;
   let nearestSq = Infinity;
@@ -245,14 +292,21 @@ function applySunLensingForce(vela) {
   if (!nearest) return;
 
   let toNearest = p5.Vector.sub(nearest.sun.pos, vela.pos);
+  if (toNearest.magSq() > 0) {
+    let toNearestDir = toNearest.copy().normalize();
+    let toNearestReoriented = applyQuantumReorientation(toNearestDir, vela);
+    toNearest = p5.Vector.mult(toNearestReoriented, toNearest.mag());
+  }
   let nearestStrength = SUN_MAGNETIC_PULL / (1 + nearestSq * SUN_FIELD_FALLOFF);
   let poleMatch = vela.polarity * nearest.polarity;
   let magneticScale = SUN_MAGNETIC_BIAS + (poleMatch < 0 ? SUN_MAGNETIC_SIGN : -SUN_MAGNETIC_SIGN);
-  toNearest.setMag(nearestStrength * magneticScale * SUN_FORCE_SCALE);
+  toNearest.setMag(nearestStrength * magneticScale * SUN_FORCE_SCALE * timeScale);
   vela.applyForce(toNearest);
 
   if (!second) {
-    applyMatrixConfinementForce(vela, nearest, nearestSq);
+    if (enableConfinement) {
+      applyMatrixConfinementForce(vela, nearest, nearestSq, timeScale);
+    }
     return;
   }
 
@@ -271,20 +325,21 @@ function applySunLensingForce(vela) {
 
   if (tubeVector.magSq() > 0) {
     let pairOpposite = nearest.polarity * second.polarity < 0;
-    let tubeStrength = SUN_TUBE_PULL * lens * (pairOpposite ? 1.2 : 0.55) * SUN_FORCE_SCALE;
+    let tubeStrength = SUN_TUBE_PULL * lens * (pairOpposite ? 1.2 : 0.55) * SUN_FORCE_SCALE * timeScale;
     tubeVector.setMag(tubeStrength);
     vela.applyForce(tubeVector);
   }
 
   let bridgeDir = bridge.copy().normalize();
+  let bridgeDirReoriented = applyQuantumReorientation(bridgeDir, vela);
   let radial = p5.Vector.sub(closestPoint, vela.pos);
   if (radial.magSq() > 0) {
     let radialDir = radial.copy().normalize();
-    let swirl = bridgeDir.cross(radialDir);
+    let swirl = bridgeDirReoriented.cross(radialDir);
     if (swirl.magSq() > 0) {
       let centerBoost = 1 - abs(t - 0.5) * 2;
       let swirlSign = nearest.polarity * second.polarity * vela.polarity;
-      swirl.setMag(SUN_SWIRL_STRENGTH * lens * centerBoost * swirlSign * SUN_FORCE_SCALE);
+      swirl.setMag(SUN_SWIRL_STRENGTH * lens * centerBoost * swirlSign * SUN_FORCE_SCALE * timeScale);
       vela.applyForce(swirl);
     }
   }
@@ -292,13 +347,15 @@ function applySunLensingForce(vela) {
   let distA = sqrt(nearestSq);
   let distB = sqrt(secondSq);
   let handoff = (distA - distB) / max(distA + distB, 0.0001);
-  let bridgeFlow = bridgeDir.mult(-handoff * SUN_BRIDGE_FLOW * lens * SUN_FORCE_SCALE);
+  let bridgeFlow = bridgeDirReoriented.mult(-handoff * SUN_BRIDGE_FLOW * lens * SUN_FORCE_SCALE * timeScale);
   vela.applyForce(bridgeFlow);
 
-  applyMatrixConfinementForce(vela, nearest, nearestSq);
+  if (enableConfinement) {
+    applyMatrixConfinementForce(vela, nearest, nearestSq, timeScale);
+  }
 }
 
-function applyMatrixConfinementForce(vela, nearestSystem, nearestSq) {
+function applyMatrixConfinementForce(vela, nearestSystem, nearestSq, timeScale = 1) {
   if (!nearestSystem) return;
 
   let spacing = heliosMeta.spacing;
@@ -310,7 +367,7 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq) {
 
   let nodePull = p5.Vector.sub(nearestSystem.sun.pos, vela.pos);
   if (nodePull.magSq() > 0) {
-    let nodeStrength = (MATRIX_NODE_LOCK / (1 + nearestSq * SUN_FIELD_FALLOFF * 1.5)) * MATRIX_FORCE_SCALE;
+    let nodeStrength = (MATRIX_NODE_LOCK / (1 + nearestSq * SUN_FIELD_FALLOFF * 1.5)) * MATRIX_FORCE_SCALE * timeScale;
     nodePull.setMag(nodeStrength);
     vela.applyForce(nodePull);
   }
@@ -319,13 +376,13 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq) {
   let axisPull = p5.Vector.sub(axisTarget, vela.pos);
   let axisSq = axisPull.magSq();
   if (axisSq > 0) {
-    let axisStrength = (MATRIX_AXIS_LOCK / (1 + axisSq * SUN_FIELD_FALLOFF * 1.5)) * MATRIX_FORCE_SCALE;
+    let axisStrength = (MATRIX_AXIS_LOCK / (1 + axisSq * SUN_FIELD_FALLOFF * 1.5)) * MATRIX_FORCE_SCALE * timeScale;
     axisPull.setMag(axisStrength);
     vela.applyForce(axisPull);
   }
 
   let layerDelta = gridZ - vela.pos.z;
-  vela.applyForce(createVector(0, 0, layerDelta * MATRIX_LAYER_LOCK * 0.02 * MATRIX_FORCE_SCALE));
+  vela.applyForce(createVector(0, 0, layerDelta * MATRIX_LAYER_LOCK * 0.02 * MATRIX_FORCE_SCALE * timeScale));
 
   let minX = heliosMeta.startX - spacing * MATRIX_CAGE_MARGIN;
   let maxX = heliosMeta.startX + spacing * (HELIOS_COLS - 1 + MATRIX_CAGE_MARGIN);
@@ -342,8 +399,101 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq) {
   if (vela.pos.z < minZ) cageForce.z += (minZ - vela.pos.z) * MATRIX_CAGE_STIFFNESS;
   if (vela.pos.z > maxZ) cageForce.z -= (vela.pos.z - maxZ) * MATRIX_CAGE_STIFFNESS;
   if (cageForce.magSq() > 0) {
-    cageForce.mult(MATRIX_FORCE_SCALE);
+    cageForce.mult(MATRIX_FORCE_SCALE * timeScale);
     vela.applyForce(cageForce);
+  }
+}
+
+function applyQuantumReorientation(baseDirection, vela) {
+  let phase = simulationTimeMs() * QUANTUM_REORIENTATION_RATE + (vela.polarity * QUANTUM_POLARITY_PHASE);
+  let shift = Math.sin(phase) * runtimeQuantumStrength;
+  if (shift === 0) return baseDirection;
+
+  let seedAxis = createVector(0.33, 0.77, 0.53);
+  let ortho = baseDirection.copy().cross(seedAxis);
+  if (ortho.magSq() < 0.000001) {
+    ortho = baseDirection.copy().cross(createVector(0.12, 0.98, 0.14));
+  }
+  if (ortho.magSq() < 0.000001) return baseDirection;
+
+  ortho.normalize();
+  let aligned = p5.Vector.mult(baseDirection, 1 - abs(shift));
+  let displaced = p5.Vector.mult(ortho, shift);
+  let blended = p5.Vector.add(aligned, displaced);
+  if (blended.magSq() === 0) return baseDirection;
+  blended.normalize();
+  return blended;
+}
+
+function registerVelaRelation(a, b, dSq, timeScale, seenPairs, i, j) {
+  let pairKey = `${i}:${j}`;
+  if (seenPairs.has(pairKey)) return;
+  seenPairs.add(pairKey);
+
+  let d = sqrt(max(dSq, 0.0001));
+  let aVel = a.vel.copy();
+  let bVel = b.vel.copy();
+  let aSpeed = aVel.mag();
+  let bSpeed = bVel.mag();
+  let velDot = 0;
+  if (aSpeed > 0.0001 && bSpeed > 0.0001) {
+    velDot = aVel.normalize().dot(bVel.normalize());
+  }
+
+  let proximity = 1 - (dSq / VELA_RELATION_RADIUS_SQ);
+  let polarityAffinity = a.polarity === b.polarity ? 1 : 0.68;
+  let phase = sin(simulationTimeMs() * VELA_RELATION_PHASE_RATE + (i + j) * 0.07);
+  let coherence = ((velDot + 1) * 0.5) * polarityAffinity;
+  let strength = proximity * coherence * (0.65 + 0.35 * abs(phase));
+  if (strength < VELA_RELATION_MIN_STRENGTH) return;
+
+  let dir = p5.Vector.sub(b.pos, a.pos);
+  if (dir.magSq() < 0.000001) return;
+  dir.normalize();
+
+  let targetDistance = VELA_RELATION_TARGET_DISTANCE + phase * VELA_RELATION_TARGET_SWING;
+  let springMag = (d - targetDistance) * VELA_RELATION_SPRING * strength * timeScale;
+  let springForce = dir.copy().mult(springMag);
+  a.applyForce(springForce);
+  b.applyForce(springForce.copy().mult(-1));
+
+  let braidAxis = createVector(0, 0, 1);
+  let tangent = dir.copy().cross(braidAxis);
+  if (tangent.magSq() < 0.000001) tangent = dir.copy().cross(createVector(0, 1, 0));
+  if (tangent.magSq() > 0.000001) {
+    tangent.normalize();
+    let braidMag = VELA_RELATION_BRAID_FORCE * phase * strength * timeScale;
+    let braidForce = tangent.mult(braidMag);
+    a.applyForce(braidForce);
+    b.applyForce(braidForce.copy().mult(-1));
+  }
+
+  velaRelations.push({
+    a,
+    b,
+    strength,
+    seed: (i * 73856093) ^ (j * 19349663)
+  });
+}
+
+function simulationTimeMs() {
+  return millis() * runtimeTimeSpeed;
+}
+
+function simulationTimeScale() {
+  return constrain(runtimeTimeSpeed, 0.1, 2.5);
+}
+
+function keyPressed() {
+  if (key === 'q' || key === 'Q') {
+    quantumIsolationMode = !quantumIsolationMode;
+  } else if (key === 't' || key === 'T') {
+    timePresetIndex = (timePresetIndex + 1) % TIME_SPEED_PRESETS.length;
+    runtimeTimeSpeed = TIME_SPEED_PRESETS[timePresetIndex];
+  } else if (key === 'r' || key === 'R') {
+    runtimeQuantumStrength = runtimeQuantumStrength > 0 ? QUANTUM_STRENGTH_OFF : QUANTUM_STRENGTH_ON;
+  } else if (key === 'i' || key === 'I') {
+    initializeHelios();
   }
 }
 
@@ -408,8 +558,9 @@ function projectWorldPoint(x, y, z) {
   let x0 = x - centerX;
   let y0 = y - centerY;
   let z0 = z;
-  let yaw = millis() * HELIOS_YAW_SPEED;
-  let pitch = millis() * HELIOS_PITCH_SPEED;
+  let t = simulationTimeMs();
+  let yaw = t * HELIOS_YAW_SPEED;
+  let pitch = t * HELIOS_PITCH_SPEED;
   let cosY = Math.cos(yaw);
   let sinY = Math.sin(yaw);
   let cosP = Math.cos(pitch);
@@ -429,6 +580,7 @@ function projectWorldPoint(x, y, z) {
 
 function drawHeliosSystems() {
   let renderables = [];
+  let projectionByVela = new Map();
 
   for (let system of heliosSystems) {
     let projection = projectWorldPoint(system.sun.pos.x, system.sun.pos.y, system.sun.pos.z);
@@ -438,12 +590,53 @@ function drawHeliosSystems() {
   for (let vela of velas) {
     drawProjectedTrail(vela);
     let projection = projectWorldPoint(vela.pos.x, vela.pos.y, vela.pos.z);
+    projectionByVela.set(vela, projection);
     renderables.push({ body: vela, projection });
   }
+
+  drawVelaRelations(projectionByVela);
 
   renderables.sort((a, b) => a.projection.depth - b.projection.depth);
   for (let entry of renderables) {
     drawProjectedBody(entry.body, entry.projection);
+  }
+}
+
+function drawVelaRelations(projectionByVela) {
+  for (let relation of velaRelations) {
+    let aProj = projectionByVela.get(relation.a);
+    let bProj = projectionByVela.get(relation.b);
+    if (!aProj || !bProj) continue;
+    if (abs(aProj.screenX - bProj.screenX) > width / 2) continue;
+    if (abs(aProj.screenY - bProj.screenY) > height / 2) continue;
+
+    let pulse = 0.5 + 0.5 * sin(simulationTimeMs() * VELA_RELATION_PULSE_RATE + relation.seed * 0.0001);
+    let alpha = VELA_RELATION_LINE_ALPHA * relation.strength * pulse * ((aProj.alpha + bProj.alpha) * 0.5);
+    let weight = (0.4 + relation.strength * 1.35) * ((aProj.scale + bProj.scale) * 0.5);
+    let dx = bProj.screenX - aProj.screenX;
+    let dy = bProj.screenY - aProj.screenY;
+    let length = sqrt(dx * dx + dy * dy);
+    if (length < 0.0001) continue;
+    let drawLength = min(length, VELA_RELATION_DRAW_MAX_LENGTH);
+    let half = drawLength * 0.5;
+    let ux = dx / length;
+    let uy = dy / length;
+    let midX = (aProj.screenX + bProj.screenX) * 0.5;
+    let midY = (aProj.screenY + bProj.screenY) * 0.5;
+    let startX = midX - ux * half;
+    let startY = midY - uy * half;
+    let endX = midX + ux * half;
+    let endY = midY + uy * half;
+
+    stroke(255, alpha);
+    strokeWeight(weight);
+    line(startX, startY, endX, endY);
+
+    if (relation.strength > 0.22) {
+      noStroke();
+      fill(255, alpha * 0.7);
+      ellipse(midX, midY, 1.4 + relation.strength * 2);
+    }
   }
 }
 
@@ -481,9 +674,12 @@ function drawProjectedBody(body, projection) {
   let prevAlpha = drawingContext.globalAlpha;
   drawingContext.globalAlpha = prevAlpha * projection.alpha;
   if (body.isSun) {
-    stroke(255, body.sunAlpha);
+    let scaleAmount = max(0, body.r - body.baseR);
+    let scaleNorm = constrain(scaleAmount / max(body.baseR, 0.0001), 0, 1);
+    let sunScaleAlpha = body.sunAlpha * (1 - scaleNorm * 0.65);
+    stroke(255, sunScaleAlpha);
     strokeWeight(1);
-    //noFill();
+    noFill();
   } else {
     noStroke();
     fill(255);
