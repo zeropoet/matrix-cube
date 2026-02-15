@@ -27,19 +27,21 @@ const HELIOS_PITCH_SPEED = 0.00003;
 const VELA_NEIGHBOR_RADIUS = 100;
 const VELA_NEIGHBOR_RADIUS_SQ = VELA_NEIGHBOR_RADIUS * VELA_NEIGHBOR_RADIUS;
 const VELA_HASH_CELL_SIZE = VELA_NEIGHBOR_RADIUS;
-const VELA_RELATION_RADIUS = 190;
+const VELA_RELATION_RADIUS = 100;
 const VELA_RELATION_RADIUS_SQ = VELA_RELATION_RADIUS * VELA_RELATION_RADIUS;
 const VELA_RELATION_MAX_TOTAL = 7200;
 const VELA_RELATION_MIN_STRENGTH = 0.022;
-const VELA_RELATION_SPRING = .035;
+const VELA_RELATION_SPRING = .019;
 const VELA_RELATION_TARGET_DISTANCE = 42;
 const VELA_RELATION_TARGET_SWING = 26;
 const VELA_RELATION_BRAID_FORCE = 0.018;
+const VELA_RELATION_VELOCITY_DAMPING = 0.024;
 const VELA_RELATION_LINE_ALPHA = 190;
 const VELA_RELATION_PULSE_RATE = 0.0055;
 const VELA_RELATION_PHASE_RATE = 0.0027;
 const VELA_RELATION_DRAW_MAX_LENGTH = 132;
-const VELA_RELATION_ECHO_MS = 3400;
+const VELA_RELATION_DECAY_HALF_LIFE_MS = 7600;
+const VELA_RELATION_RESIDUAL_FLOOR = 0.012;
 const VELA_RELATION_BLEND = 0.38;
 const SUN_FIELD_FALLOFF = 0.00002;
 const SUN_FORCE_SCALE = 0.42;
@@ -51,10 +53,14 @@ const SUN_SWIRL_STRENGTH = 0.8;
 const SUN_BRIDGE_FLOW = 0.68;
 const MATRIX_FORCE_SCALE = 0.32;
 const MATRIX_NODE_LOCK = 1.0;
-const MATRIX_AXIS_LOCK = 0.7;
-const MATRIX_LAYER_LOCK = 1.0;
-const MATRIX_CAGE_STIFFNESS = 0.01;
+const MATRIX_AXIS_LOCK = 0.9;
+const MATRIX_LAYER_LOCK = 1.15;
 const MATRIX_CAGE_MARGIN = 0.62;
+const MATRIX_SOFTBODY_INFLUENCE = 0.45;
+const MATRIX_SOFTBODY_SPRING = 0.11;
+const MATRIX_SOFTBODY_DAMPING = 0.3;
+const MATRIX_SOFTBODY_OUTSIDE_MULT = 5.2;
+const MATRIX_SOFTBODY_MAX_FORCE = 3.6;
 const QUANTUM_REORIENTATION_STRENGTH = .8;
 const QUANTUM_REORIENTATION_RATE = 0.0016;
 const QUANTUM_POLARITY_PHASE = 1.0472;
@@ -104,6 +110,7 @@ let captureProgressLabel = null;
 let captureProgressStatus = null;
 let captureHideTimer = null;
 let visualTheme = null;
+let relationEchoLastRefreshMs = null;
 
 function setup() {
   applyPixelDensity();
@@ -139,6 +146,7 @@ function initializeHelios() {
   let spawnField = createWeightField(HELIOS_COLS, HELIOS_ROWS, HELIOS_DEPTH);
   velas = createDistributedVelas(heliosLattice, spawnField, TOTAL_VELA_COUNT);
   relationEchoes.clear();
+  relationEchoLastRefreshMs = null;
 }
 
 function refreshVisualTheme() {
@@ -489,17 +497,42 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq, timeScale =
   let minZ = cageBounds.minZ;
   let maxZ = cageBounds.maxZ;
 
-  let cageForce = createVector(0, 0, 0);
-  if (vela.pos.x < minX) cageForce.x += (minX - vela.pos.x) * MATRIX_CAGE_STIFFNESS;
-  if (vela.pos.x > maxX) cageForce.x -= (vela.pos.x - maxX) * MATRIX_CAGE_STIFFNESS;
-  if (vela.pos.y < minY) cageForce.y += (minY - vela.pos.y) * MATRIX_CAGE_STIFFNESS;
-  if (vela.pos.y > maxY) cageForce.y -= (vela.pos.y - maxY) * MATRIX_CAGE_STIFFNESS;
-  if (vela.pos.z < minZ) cageForce.z += (minZ - vela.pos.z) * MATRIX_CAGE_STIFFNESS;
-  if (vela.pos.z > maxZ) cageForce.z -= (vela.pos.z - maxZ) * MATRIX_CAGE_STIFFNESS;
+  let cageForce = computeSoftBodyCageForce(vela, minX, maxX, minY, maxY, minZ, maxZ, spacing);
   if (cageForce.magSq() > 0) {
+    if (cageForce.magSq() > MATRIX_SOFTBODY_MAX_FORCE * MATRIX_SOFTBODY_MAX_FORCE) {
+      cageForce.setMag(MATRIX_SOFTBODY_MAX_FORCE);
+    }
     cageForce.mult(MATRIX_FORCE_SCALE * timeScale);
     vela.applyForce(cageForce);
   }
+}
+
+function computeSoftBodyCageForce(vela, minX, maxX, minY, maxY, minZ, maxZ, spacing) {
+  let influence = max(spacing * MATRIX_SOFTBODY_INFLUENCE, 1);
+  let cageForce = createVector(0, 0, 0);
+
+  applySoftBodyFaceForce(cageForce, vela.pos.x - minX, vela.vel.x, 1, influence);
+  applySoftBodyFaceForce(cageForce, maxX - vela.pos.x, -vela.vel.x, -1, influence);
+  applySoftBodyFaceForce(cageForce, vela.pos.y - minY, vela.vel.y, 1, influence, 'y');
+  applySoftBodyFaceForce(cageForce, maxY - vela.pos.y, -vela.vel.y, -1, influence, 'y');
+  applySoftBodyFaceForce(cageForce, vela.pos.z - minZ, vela.vel.z, 1, influence, 'z');
+  applySoftBodyFaceForce(cageForce, maxZ - vela.pos.z, -vela.vel.z, -1, influence, 'z');
+
+  return cageForce;
+}
+
+function applySoftBodyFaceForce(outForce, signedDistance, normalVelocity, directionSign, influence, axis = 'x') {
+  if (signedDistance >= influence) return;
+
+  let compression = 1 - (signedDistance / influence);
+  let outside = signedDistance < 0 ? 1 + ((-signedDistance) / influence) : 1;
+  let springForce = compression * MATRIX_SOFTBODY_SPRING * outside * (signedDistance < 0 ? MATRIX_SOFTBODY_OUTSIDE_MULT : 1);
+  let dampingForce = max(0, -normalVelocity) * MATRIX_SOFTBODY_DAMPING;
+  let totalForce = (springForce + dampingForce) * directionSign;
+
+  if (axis === 'x') outForce.x += totalForce;
+  if (axis === 'y') outForce.y += totalForce;
+  if (axis === 'z') outForce.z += totalForce;
 }
 
 function applyQuantumReorientation(baseDirection, vela) {
@@ -555,6 +588,12 @@ function registerVelaRelation(a, b, dSq, timeScale, seenPairs, i, j) {
   a.applyForce(springForce);
   b.applyForce(springForce.copy().mult(-1));
 
+  let relativeVelocity = p5.Vector.sub(b.vel, a.vel);
+  let alongLinkVelocity = p5.Vector.dot(relativeVelocity, dir);
+  let dampingForce = dir.copy().mult(alongLinkVelocity * VELA_RELATION_VELOCITY_DAMPING * strength * timeScale);
+  a.applyForce(dampingForce);
+  b.applyForce(dampingForce.copy().mult(-1));
+
   let braidAxis = createVector(0, 0, 1);
   let tangent = dir.copy().cross(braidAxis);
   if (tangent.magSq() < 0.000001) tangent = dir.copy().cross(createVector(0, 1, 0));
@@ -577,6 +616,10 @@ function registerVelaRelation(a, b, dSq, timeScale, seenPairs, i, j) {
 
 function refreshRelationEchoes() {
   let now = simulationTimeMs();
+  if (relationEchoLastRefreshMs === null) relationEchoLastRefreshMs = now;
+  let deltaMs = max(0, now - relationEchoLastRefreshMs);
+  relationEchoLastRefreshMs = now;
+  let decay = pow(0.5, deltaMs / VELA_RELATION_DECAY_HALF_LIFE_MS);
   let activeKeys = new Set();
 
   for (let relation of velaRelations) {
@@ -594,7 +637,7 @@ function refreshRelationEchoes() {
         a: relation.a,
         b: relation.b,
         seed: relation.seed,
-        strength: relation.strength,
+        strength: max(relation.strength, VELA_RELATION_RESIDUAL_FLOOR),
         lastSeenMs: now
       });
     }
@@ -602,10 +645,7 @@ function refreshRelationEchoes() {
 
   for (let [key, echo] of relationEchoes.entries()) {
     if (activeKeys.has(key)) continue;
-    let ageMs = now - echo.lastSeenMs;
-    if (ageMs > VELA_RELATION_ECHO_MS) {
-      relationEchoes.delete(key);
-    }
+    echo.strength = max(echo.strength * decay, VELA_RELATION_RESIDUAL_FLOOR);
   }
 }
 
@@ -1053,13 +1093,9 @@ function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed =
 }
 
 function drawVelaRelations(projectionByVela) {
-  let now = simulationTimeMs();
   for (let relation of relationEchoes.values()) {
-    let ageMs = now - relation.lastSeenMs;
-    if (ageMs > VELA_RELATION_ECHO_MS) continue;
-    let ageFade = 1 - (ageMs / VELA_RELATION_ECHO_MS);
-    let relationStrength = relation.strength * ageFade;
-    if (relationStrength <= 0.01) continue;
+    let relationStrength = relation.strength;
+    if (relationStrength <= 0.004) continue;
 
     let aProj = projectionByVela.get(relation.a);
     let bProj = projectionByVela.get(relation.b);

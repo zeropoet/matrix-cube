@@ -9,8 +9,8 @@ const SUN_FADE_MS = 100;
 const SUN_SCALE_LERP = 1.7;
 const SUN_ALPHA_LERP = .008;
 const VELA_FORCE_WARMUP_FRAMES = 220;
-const VELA_TURN_SMOOTHING = .1;
-const VELA_VELOCITY_DAMPING = 1;
+const VELA_TURN_SMOOTHING = .16;
+const VELA_VELOCITY_DAMPING = .994;
 
 class Vela {
   constructor(x, y, vx, vy, m, isSun = false, z = 0, vz = 0, polarity = 1) {
