@@ -2,6 +2,7 @@ let heliosLattice = [];
 let heliosSystems = [];
 let velas = [];
 let velaRelations = [];
+let relationEchoes = new Map();
 let cnv;
 let heliosMeta = {
   spacing: 1,
@@ -29,7 +30,7 @@ const VELA_HASH_CELL_SIZE = VELA_NEIGHBOR_RADIUS;
 const VELA_RELATION_RADIUS = 130;
 const VELA_RELATION_RADIUS_SQ = VELA_RELATION_RADIUS * VELA_RELATION_RADIUS;
 const VELA_RELATION_MAX_TOTAL = 2200;
-const VELA_RELATION_MIN_STRENGTH = 0.08;
+const VELA_RELATION_MIN_STRENGTH = 0.06;
 const VELA_RELATION_SPRING = .035;
 const VELA_RELATION_TARGET_DISTANCE = 42;
 const VELA_RELATION_TARGET_SWING = 26;
@@ -37,7 +38,9 @@ const VELA_RELATION_BRAID_FORCE = 0.018;
 const VELA_RELATION_LINE_ALPHA = 190;
 const VELA_RELATION_PULSE_RATE = 0.0055;
 const VELA_RELATION_PHASE_RATE = 0.0027;
-const VELA_RELATION_DRAW_MAX_LENGTH = 84;
+const VELA_RELATION_DRAW_MAX_LENGTH = 132;
+const VELA_RELATION_ECHO_MS = 3400;
+const VELA_RELATION_BLEND = 0.38;
 const SUN_FIELD_FALLOFF = 0.00002;
 const SUN_FORCE_SCALE = 0.42;
 const SUN_MAGNETIC_PULL = 2.6;
@@ -131,6 +134,7 @@ function initializeHelios() {
   heliosSystems = flattenLattice(heliosLattice);
   let spawnField = createWeightField(HELIOS_COLS, HELIOS_ROWS, HELIOS_DEPTH);
   velas = createDistributedVelas(heliosLattice, spawnField, TOTAL_VELA_COUNT);
+  relationEchoes.clear();
 }
 
 function refreshVisualTheme() {
@@ -346,6 +350,8 @@ function updateHeliosPhysics() {
     velaRelations = velaRelations.slice(0, VELA_RELATION_MAX_TOTAL);
   }
 
+  refreshRelationEchoes();
+
   for (let system of heliosSystems) {
     system.sun.applySwell();
   }
@@ -556,11 +562,46 @@ function registerVelaRelation(a, b, dSq, timeScale, seenPairs, i, j) {
   }
 
   velaRelations.push({
+    key: pairKey,
     a,
     b,
     strength,
     seed: (i * 73856093) ^ (j * 19349663)
   });
+}
+
+function refreshRelationEchoes() {
+  let now = simulationTimeMs();
+  let activeKeys = new Set();
+
+  for (let relation of velaRelations) {
+    activeKeys.add(relation.key);
+    let existing = relationEchoes.get(relation.key);
+    if (existing) {
+      existing.a = relation.a;
+      existing.b = relation.b;
+      existing.seed = relation.seed;
+      existing.lastSeenMs = now;
+      existing.strength = lerp(existing.strength, relation.strength, VELA_RELATION_BLEND);
+    } else {
+      relationEchoes.set(relation.key, {
+        key: relation.key,
+        a: relation.a,
+        b: relation.b,
+        seed: relation.seed,
+        strength: relation.strength,
+        lastSeenMs: now
+      });
+    }
+  }
+
+  for (let [key, echo] of relationEchoes.entries()) {
+    if (activeKeys.has(key)) continue;
+    let ageMs = now - echo.lastSeenMs;
+    if (ageMs > VELA_RELATION_ECHO_MS) {
+      relationEchoes.delete(key);
+    }
+  }
 }
 
 function simulationTimeMs() {
@@ -918,7 +959,14 @@ function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed =
 }
 
 function drawVelaRelations(projectionByVela) {
-  for (let relation of velaRelations) {
+  let now = simulationTimeMs();
+  for (let relation of relationEchoes.values()) {
+    let ageMs = now - relation.lastSeenMs;
+    if (ageMs > VELA_RELATION_ECHO_MS) continue;
+    let ageFade = 1 - (ageMs / VELA_RELATION_ECHO_MS);
+    let relationStrength = relation.strength * ageFade;
+    if (relationStrength <= 0.01) continue;
+
     let aProj = projectionByVela.get(relation.a);
     let bProj = projectionByVela.get(relation.b);
     if (!aProj || !bProj) continue;
@@ -926,8 +974,8 @@ function drawVelaRelations(projectionByVela) {
     if (abs(aProj.screenY - bProj.screenY) > height / 2) continue;
 
     let pulse = 0.5 + 0.5 * sin(simulationTimeMs() * VELA_RELATION_PULSE_RATE + relation.seed * 0.0001);
-    let alpha = VELA_RELATION_LINE_ALPHA * relation.strength * pulse * ((aProj.alpha + bProj.alpha) * 0.5);
-    let weight = (0.45 + relation.strength * 1.6) * ((aProj.scale + bProj.scale) * 0.5);
+    let alpha = VELA_RELATION_LINE_ALPHA * relationStrength * pulse * ((aProj.alpha + bProj.alpha) * 0.5);
+    let weight = (0.45 + relationStrength * 1.6) * ((aProj.scale + bProj.scale) * 0.5);
     let dx = bProj.screenX - aProj.screenX;
     let dy = bProj.screenY - aProj.screenY;
     let length = sqrt(dx * dx + dy * dy);
@@ -946,9 +994,9 @@ function drawVelaRelations(projectionByVela) {
     let nx = -uy;
     let ny = ux;
     let bendDirection = (relation.seed % 2 === 0) ? 1 : -1;
-    let bendBase = min(drawLength * 0.33, 18) * (0.45 + relation.strength * 1.05) * bendDirection;
+    let bendBase = min(drawLength * 0.33, 18) * (0.45 + relationStrength * 1.05) * bendDirection;
     let swayPhase = simulationTimeMs() * RELATION_ARC_SWAY_RATE + relation.seed * 0.00021;
-    let sway = sin(swayPhase) * RELATION_ARC_SWAY_PIXELS * (0.35 + relation.strength * 0.75);
+    let sway = sin(swayPhase) * RELATION_ARC_SWAY_PIXELS * (0.35 + relationStrength * 0.75);
     let bend = bendBase + sway;
     let cx = midX + nx * bend;
     let cy = midY + ny * bend;
@@ -973,10 +1021,10 @@ function drawVelaRelations(projectionByVela) {
     quadraticVertex(cx, cy, endX, endY);
     endShape();
 
-    if (relation.strength > 0.22) {
+    if (relationStrength > 0.18) {
       noStroke();
       fill(relationColor[0], relationColor[1], relationColor[2], alpha * 0.72);
-      ellipse(cx, cy, 1.1 + relation.strength * 2.3);
+      ellipse(cx, cy, 1.1 + relationStrength * 2.3);
     }
   }
 }
