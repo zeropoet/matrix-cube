@@ -72,6 +72,10 @@ const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 18;
 const NIGHT_START_HOUR = 20;
 const NIGHT_END_HOUR = 6;
+const GUIDE_ARC_SWAY_RATE = 0.0012;
+const GUIDE_ARC_SWAY_PIXELS = 9;
+const RELATION_ARC_SWAY_RATE = 0.0022;
+const RELATION_ARC_SWAY_PIXELS = 8;
 const VELA_INITIAL_SPEED = 1.12;
 const CAPTURE_DURATION_MS = 60000;
 const CAPTURE_FILENAME = 'helios-lattice-capture';
@@ -849,22 +853,25 @@ function drawLatticeGuides(projectionBySystem) {
 
         if (c + 1 < HELIOS_COLS) {
           let to = projectionBySystem.get(heliosLattice[z][r][c + 1]);
-          drawGuideSegment(from, to, layerNorm, false);
+          let seed = (z * 92821) ^ (r * 68917) ^ (c * 2833) ^ 41;
+          drawGuideSegment(from, to, layerNorm, false, seed);
         }
         if (r + 1 < HELIOS_ROWS) {
           let to = projectionBySystem.get(heliosLattice[z][r + 1][c]);
-          drawGuideSegment(from, to, layerNorm, false);
+          let seed = (z * 11789) ^ (r * 52183) ^ (c * 3643) ^ 73;
+          drawGuideSegment(from, to, layerNorm, false, seed);
         }
         if (z + 1 < HELIOS_DEPTH) {
           let to = projectionBySystem.get(heliosLattice[z + 1][r][c]);
-          drawGuideSegment(from, to, layerNorm, true);
+          let seed = (z * 45613) ^ (r * 19391) ^ (c * 8191) ^ 101;
+          drawGuideSegment(from, to, layerNorm, true, seed);
         }
       }
     }
   }
 }
 
-function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false) {
+function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed = 0) {
   if (!aProj || !bProj) return;
   let dx = bProj.screenX - aProj.screenX;
   let dy = bProj.screenY - aProj.screenY;
@@ -901,7 +908,9 @@ function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false) {
   let midY = (aProj.screenY + bProj.screenY) * 0.5;
   let nx = -dy / length;
   let ny = dx / length;
-  let bow = min(24, length * 0.18) * (0.4 + layerNorm * 0.9);
+  let swayPhase = simulationTimeMs() * GUIDE_ARC_SWAY_RATE + seed * 0.00037;
+  let sway = sin(swayPhase) * GUIDE_ARC_SWAY_PIXELS * (0.45 + layerNorm * 0.9);
+  let bow = (min(24, length * 0.18) * (0.4 + layerNorm * 0.9)) + sway;
   beginShape();
   vertex(aProj.screenX, aProj.screenY);
   quadraticVertex(midX + nx * bow, midY + ny * bow, bProj.screenX, bProj.screenY);
@@ -937,7 +946,10 @@ function drawVelaRelations(projectionByVela) {
     let nx = -uy;
     let ny = ux;
     let bendDirection = (relation.seed % 2 === 0) ? 1 : -1;
-    let bend = min(drawLength * 0.33, 18) * (0.45 + relation.strength * 1.05) * bendDirection;
+    let bendBase = min(drawLength * 0.33, 18) * (0.45 + relation.strength * 1.05) * bendDirection;
+    let swayPhase = simulationTimeMs() * RELATION_ARC_SWAY_RATE + relation.seed * 0.00021;
+    let sway = sin(swayPhase) * RELATION_ARC_SWAY_PIXELS * (0.35 + relation.strength * 0.75);
+    let bend = bendBase + sway;
     let cx = midX + nx * bend;
     let cy = midY + ny * bend;
 
