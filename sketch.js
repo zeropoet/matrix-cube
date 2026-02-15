@@ -14,7 +14,8 @@ let heliosMeta = {
 const TOTAL_VELA_COUNT = 212;
 const VELA_MASS_MIN = 5;
 const VELA_MASS_MAX = 10;
-const BACKGROUND_COLOR = [12, 16, 30, 34];
+const BACKGROUND_DAY = [12, 16, 30];
+const BACKGROUND_NIGHT = [0, 0, 0];
 const SUN_MASS = 1;
 const HELIOS_ROWS = 4;
 const HELIOS_COLS = 4;
@@ -59,14 +60,18 @@ const TRAIL_MAX_PX = 1.5;
 const TRAIL_SPEED_FOR_MAX = 24;
 const TRAIL_WIDTH_LERP = 0.34;
 const TRAIL_ALPHA = 132;
-const TRAIL_WARM = [255, 193, 120];
-const TRAIL_COOL = [126, 208, 255];
-const BODY_WARM = [255, 220, 166];
-const BODY_COOL = [155, 226, 255];
-const SUN_STROKE = [245, 240, 219];
-const GUIDE_WARM = [255, 171, 129];
-const GUIDE_COOL = [111, 194, 255];
-const GUIDE_LAYER = [156, 235, 192];
+const TRAIL_WARM_DAY = [255, 193, 120];
+const TRAIL_COOL_DAY = [126, 208, 255];
+const BODY_WARM_DAY = [255, 220, 166];
+const BODY_COOL_DAY = [155, 226, 255];
+const SUN_STROKE_DAY = [245, 240, 219];
+const GUIDE_WARM_DAY = [255, 171, 129];
+const GUIDE_COOL_DAY = [111, 194, 255];
+const GUIDE_LAYER_DAY = [156, 235, 192];
+const DAY_START_HOUR = 8;
+const DAY_END_HOUR = 18;
+const NIGHT_START_HOUR = 20;
+const NIGHT_END_HOUR = 6;
 const VELA_INITIAL_SPEED = 1.12;
 const CAPTURE_DURATION_MS = 60000;
 const CAPTURE_FILENAME = 'helios-lattice-capture';
@@ -87,6 +92,7 @@ let captureProgressFill = null;
 let captureProgressLabel = null;
 let captureProgressStatus = null;
 let captureHideTimer = null;
+let visualTheme = null;
 
 function setup() {
   applyPixelDensity();
@@ -98,12 +104,14 @@ function setup() {
   cnv.style('top', '0');
   cnv.style('left', '0');
   cnv.style('pointer-events', 'none');
-  background(255);
+  refreshVisualTheme();
+  background(...visualTheme.background);
   initializeHelios();
 }
 
 function draw() {
-  background(...BACKGROUND_COLOR);
+  refreshVisualTheme();
+  background(...visualTheme.background);
   updateHeliosPhysics();
   drawHeliosSystems();
 }
@@ -119,6 +127,62 @@ function initializeHelios() {
   heliosSystems = flattenLattice(heliosLattice);
   let spawnField = createWeightField(HELIOS_COLS, HELIOS_ROWS, HELIOS_DEPTH);
   velas = createDistributedVelas(heliosLattice, spawnField, TOTAL_VELA_COUNT);
+}
+
+function refreshVisualTheme() {
+  let hour = localHourFloat();
+  let dayFactor = dayColorFactor(hour);
+  visualTheme = createVisualTheme(dayFactor);
+}
+
+function localHourFloat() {
+  let now = new Date();
+  return now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+}
+
+function dayColorFactor(hour) {
+  if (hour >= DAY_START_HOUR && hour <= DAY_END_HOUR) return 1;
+  if (hour >= NIGHT_START_HOUR || hour <= NIGHT_END_HOUR) return 0;
+  if (hour > NIGHT_END_HOUR && hour < DAY_START_HOUR) {
+    let t = (hour - NIGHT_END_HOUR) / (DAY_START_HOUR - NIGHT_END_HOUR);
+    return smoothstep(t);
+  }
+  let t = (hour - DAY_END_HOUR) / (NIGHT_START_HOUR - DAY_END_HOUR);
+  return 1 - smoothstep(t);
+}
+
+function smoothstep(t) {
+  let x = constrain(t, 0, 1);
+  return x * x * (3 - 2 * x);
+}
+
+function createVisualTheme(dayFactor) {
+  return {
+    dayFactor,
+    background: colorByDayFactor(BACKGROUND_DAY, dayFactor, BACKGROUND_NIGHT),
+    trailWarm: colorByDayFactor(TRAIL_WARM_DAY, dayFactor),
+    trailCool: colorByDayFactor(TRAIL_COOL_DAY, dayFactor),
+    bodyWarm: colorByDayFactor(BODY_WARM_DAY, dayFactor),
+    bodyCool: colorByDayFactor(BODY_COOL_DAY, dayFactor),
+    sunStroke: colorByDayFactor(SUN_STROKE_DAY, dayFactor),
+    guideWarm: colorByDayFactor(GUIDE_WARM_DAY, dayFactor),
+    guideCool: colorByDayFactor(GUIDE_COOL_DAY, dayFactor),
+    guideLayer: colorByDayFactor(GUIDE_LAYER_DAY, dayFactor)
+  };
+}
+
+function colorByDayFactor(dayRgb, dayFactor, nightOverride = null) {
+  let gray = luminance(dayRgb);
+  let nightBase = nightOverride || [gray, gray, gray];
+  return [
+    lerp(nightBase[0], dayRgb[0], dayFactor),
+    lerp(nightBase[1], dayRgb[1], dayFactor),
+    lerp(nightBase[2], dayRgb[2], dayFactor)
+  ];
+}
+
+function luminance(rgb) {
+  return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
 }
 
 function applyPixelDensity() {
@@ -814,14 +878,14 @@ function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false) {
   let lerpT = isDepthBridge ? 0.65 : 0.5;
   let lineColor = isDepthBridge
     ? [
-      lerp(GUIDE_COOL[0], GUIDE_LAYER[0], lerpT),
-      lerp(GUIDE_COOL[1], GUIDE_LAYER[1], lerpT),
-      lerp(GUIDE_COOL[2], GUIDE_LAYER[2], lerpT)
+      lerp(visualTheme.guideCool[0], visualTheme.guideLayer[0], lerpT),
+      lerp(visualTheme.guideCool[1], visualTheme.guideLayer[1], lerpT),
+      lerp(visualTheme.guideCool[2], visualTheme.guideLayer[2], lerpT)
     ]
     : [
-      lerp(GUIDE_WARM[0], GUIDE_COOL[0], lerpT),
-      lerp(GUIDE_WARM[1], GUIDE_COOL[1], lerpT),
-      lerp(GUIDE_WARM[2], GUIDE_COOL[2], lerpT)
+      lerp(visualTheme.guideWarm[0], visualTheme.guideCool[0], lerpT),
+      lerp(visualTheme.guideWarm[1], visualTheme.guideCool[1], lerpT),
+      lerp(visualTheme.guideWarm[2], visualTheme.guideCool[2], lerpT)
     ];
 
   stroke(lineColor[0], lineColor[1], lineColor[2], alpha);
@@ -880,14 +944,14 @@ function drawVelaRelations(projectionByVela) {
     let samePolarity = relation.a.polarity === relation.b.polarity;
     let relationColor = samePolarity
       ? [
-        lerp(TRAIL_COOL[0], GUIDE_COOL[0], 0.5),
-        lerp(TRAIL_COOL[1], GUIDE_COOL[1], 0.5),
-        lerp(TRAIL_COOL[2], GUIDE_COOL[2], 0.5)
+        lerp(visualTheme.trailCool[0], visualTheme.guideCool[0], 0.5),
+        lerp(visualTheme.trailCool[1], visualTheme.guideCool[1], 0.5),
+        lerp(visualTheme.trailCool[2], visualTheme.guideCool[2], 0.5)
       ]
       : [
-        lerp(TRAIL_WARM[0], GUIDE_WARM[0], 0.5),
-        lerp(TRAIL_WARM[1], GUIDE_WARM[1], 0.5),
-        lerp(TRAIL_WARM[2], GUIDE_WARM[2], 0.5)
+        lerp(visualTheme.trailWarm[0], visualTheme.guideWarm[0], 0.5),
+        lerp(visualTheme.trailWarm[1], visualTheme.guideWarm[1], 0.5),
+        lerp(visualTheme.trailWarm[2], visualTheme.guideWarm[2], 0.5)
       ];
     stroke(relationColor[0], relationColor[1], relationColor[2], alpha);
     strokeWeight(weight);
@@ -922,7 +986,7 @@ function drawProjectedTrail(vela) {
   let targetWidth = lerp(TRAIL_TARGET_PX, TRAIL_MAX_PX, speedTaper) * depthBoost;
   if (vela.trailWidthPx === undefined) vela.trailWidthPx = TRAIL_MAX_PX;
   vela.trailWidthPx = lerp(vela.trailWidthPx, targetWidth, TRAIL_WIDTH_LERP);
-  let colorMix = vela.polarity > 0 ? TRAIL_WARM : TRAIL_COOL;
+  let colorMix = vela.polarity > 0 ? visualTheme.trailWarm : visualTheme.trailCool;
   stroke(colorMix[0], colorMix[1], colorMix[2], TRAIL_ALPHA * currProjection.alpha);
   strokeWeight(max(TRAIL_TARGET_PX, vela.trailWidthPx));
   line(
@@ -943,12 +1007,12 @@ function drawProjectedBody(body, projection) {
     let scaleAmount = max(0, body.r - body.baseR);
     let scaleNorm = constrain(scaleAmount / max(body.baseR, 0.0001), 0, 1);
     let sunScaleAlpha = body.sunAlpha * (1 - scaleNorm * 0.65);
-    stroke(SUN_STROKE[0], SUN_STROKE[1], SUN_STROKE[2], sunScaleAlpha);
+    stroke(visualTheme.sunStroke[0], visualTheme.sunStroke[1], visualTheme.sunStroke[2], sunScaleAlpha);
     strokeWeight(1);
     noFill();
   } else {
     noStroke();
-    let bodyColor = body.polarity > 0 ? BODY_WARM : BODY_COOL;
+    let bodyColor = body.polarity > 0 ? visualTheme.bodyWarm : visualTheme.bodyCool;
     fill(bodyColor[0], bodyColor[1], bodyColor[2]);
   }
   ellipse(0, 0, body.r * 2);
