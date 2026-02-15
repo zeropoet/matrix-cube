@@ -14,7 +14,7 @@ let heliosMeta = {
 const TOTAL_VELA_COUNT = 212;
 const VELA_MASS_MIN = 5;
 const VELA_MASS_MAX = 10;
-const BACKGROUND_COLOR = [0, 10];
+const BACKGROUND_COLOR = [12, 16, 30, 34];
 const SUN_MASS = 1;
 const HELIOS_ROWS = 4;
 const HELIOS_COLS = 4;
@@ -33,10 +33,10 @@ const VELA_RELATION_SPRING = .035;
 const VELA_RELATION_TARGET_DISTANCE = 42;
 const VELA_RELATION_TARGET_SWING = 26;
 const VELA_RELATION_BRAID_FORCE = 0.018;
-const VELA_RELATION_LINE_ALPHA = 170;
+const VELA_RELATION_LINE_ALPHA = 190;
 const VELA_RELATION_PULSE_RATE = 0.0055;
 const VELA_RELATION_PHASE_RATE = 0.0027;
-const VELA_RELATION_DRAW_MAX_LENGTH = 22;
+const VELA_RELATION_DRAW_MAX_LENGTH = 84;
 const SUN_FIELD_FALLOFF = 0.00002;
 const SUN_FORCE_SCALE = 0.42;
 const SUN_MAGNETIC_PULL = 2.6;
@@ -58,7 +58,15 @@ const TRAIL_TARGET_PX = 1;
 const TRAIL_MAX_PX = 1.5;
 const TRAIL_SPEED_FOR_MAX = 24;
 const TRAIL_WIDTH_LERP = 0.34;
-const TRAIL_ALPHA = 120;
+const TRAIL_ALPHA = 132;
+const TRAIL_WARM = [255, 193, 120];
+const TRAIL_COOL = [126, 208, 255];
+const BODY_WARM = [255, 220, 166];
+const BODY_COOL = [155, 226, 255];
+const SUN_STROKE = [245, 240, 219];
+const GUIDE_WARM = [255, 171, 129];
+const GUIDE_COOL = [111, 194, 255];
+const GUIDE_LAYER = [156, 235, 192];
 const VELA_INITIAL_SPEED = 1.12;
 const CAPTURE_DURATION_MS = 60000;
 const CAPTURE_FILENAME = 'helios-lattice-capture';
@@ -741,11 +749,15 @@ function projectWorldPoint(x, y, z) {
 function drawHeliosSystems() {
   let renderables = [];
   let projectionByVela = new Map();
+  let projectionBySystem = new Map();
 
   for (let system of heliosSystems) {
     let projection = projectWorldPoint(system.sun.pos.x, system.sun.pos.y, system.sun.pos.z);
+    projectionBySystem.set(system, projection);
     renderables.push({ body: system.sun, projection });
   }
+
+  drawLatticeGuides(projectionBySystem);
 
   for (let vela of velas) {
     drawProjectedTrail(vela);
@@ -762,6 +774,76 @@ function drawHeliosSystems() {
   }
 }
 
+function drawLatticeGuides(projectionBySystem) {
+  for (let z = 0; z < HELIOS_DEPTH; z++) {
+    let layerNorm = HELIOS_DEPTH > 1 ? z / (HELIOS_DEPTH - 1) : 0.5;
+    for (let r = 0; r < HELIOS_ROWS; r++) {
+      for (let c = 0; c < HELIOS_COLS; c++) {
+        let system = heliosLattice[z][r][c];
+        let from = projectionBySystem.get(system);
+        if (!from) continue;
+
+        if (c + 1 < HELIOS_COLS) {
+          let to = projectionBySystem.get(heliosLattice[z][r][c + 1]);
+          drawGuideSegment(from, to, layerNorm, false);
+        }
+        if (r + 1 < HELIOS_ROWS) {
+          let to = projectionBySystem.get(heliosLattice[z][r + 1][c]);
+          drawGuideSegment(from, to, layerNorm, false);
+        }
+        if (z + 1 < HELIOS_DEPTH) {
+          let to = projectionBySystem.get(heliosLattice[z + 1][r][c]);
+          drawGuideSegment(from, to, layerNorm, true);
+        }
+      }
+    }
+  }
+}
+
+function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false) {
+  if (!aProj || !bProj) return;
+  let dx = bProj.screenX - aProj.screenX;
+  let dy = bProj.screenY - aProj.screenY;
+  let length = sqrt(dx * dx + dy * dy);
+  if (length < 2) return;
+
+  let alphaBase = isDepthBridge ? 46 : 58;
+  let alpha = alphaBase * ((aProj.alpha + bProj.alpha) * 0.5) * (0.8 + layerNorm * 0.35);
+  let weight = isDepthBridge ? 0.9 : 1.1;
+  weight *= (aProj.scale + bProj.scale) * 0.5;
+  let lerpT = isDepthBridge ? 0.65 : 0.5;
+  let lineColor = isDepthBridge
+    ? [
+      lerp(GUIDE_COOL[0], GUIDE_LAYER[0], lerpT),
+      lerp(GUIDE_COOL[1], GUIDE_LAYER[1], lerpT),
+      lerp(GUIDE_COOL[2], GUIDE_LAYER[2], lerpT)
+    ]
+    : [
+      lerp(GUIDE_WARM[0], GUIDE_COOL[0], lerpT),
+      lerp(GUIDE_WARM[1], GUIDE_COOL[1], lerpT),
+      lerp(GUIDE_WARM[2], GUIDE_COOL[2], lerpT)
+    ];
+
+  stroke(lineColor[0], lineColor[1], lineColor[2], alpha);
+  strokeWeight(weight);
+  noFill();
+
+  if (!isDepthBridge) {
+    line(aProj.screenX, aProj.screenY, bProj.screenX, bProj.screenY);
+    return;
+  }
+
+  let midX = (aProj.screenX + bProj.screenX) * 0.5;
+  let midY = (aProj.screenY + bProj.screenY) * 0.5;
+  let nx = -dy / length;
+  let ny = dx / length;
+  let bow = min(24, length * 0.18) * (0.4 + layerNorm * 0.9);
+  beginShape();
+  vertex(aProj.screenX, aProj.screenY);
+  quadraticVertex(midX + nx * bow, midY + ny * bow, bProj.screenX, bProj.screenY);
+  endShape();
+}
+
 function drawVelaRelations(projectionByVela) {
   for (let relation of velaRelations) {
     let aProj = projectionByVela.get(relation.a);
@@ -772,7 +854,7 @@ function drawVelaRelations(projectionByVela) {
 
     let pulse = 0.5 + 0.5 * sin(simulationTimeMs() * VELA_RELATION_PULSE_RATE + relation.seed * 0.0001);
     let alpha = VELA_RELATION_LINE_ALPHA * relation.strength * pulse * ((aProj.alpha + bProj.alpha) * 0.5);
-    let weight = (0.4 + relation.strength * 1.35) * ((aProj.scale + bProj.scale) * 0.5);
+    let weight = (0.45 + relation.strength * 1.6) * ((aProj.scale + bProj.scale) * 0.5);
     let dx = bProj.screenX - aProj.screenX;
     let dy = bProj.screenY - aProj.screenY;
     let length = sqrt(dx * dx + dy * dy);
@@ -788,14 +870,37 @@ function drawVelaRelations(projectionByVela) {
     let endX = midX + ux * half;
     let endY = midY + uy * half;
 
-    stroke(255, alpha);
+    let nx = -uy;
+    let ny = ux;
+    let bendDirection = (relation.seed % 2 === 0) ? 1 : -1;
+    let bend = min(drawLength * 0.33, 18) * (0.45 + relation.strength * 1.05) * bendDirection;
+    let cx = midX + nx * bend;
+    let cy = midY + ny * bend;
+
+    let samePolarity = relation.a.polarity === relation.b.polarity;
+    let relationColor = samePolarity
+      ? [
+        lerp(TRAIL_COOL[0], GUIDE_COOL[0], 0.5),
+        lerp(TRAIL_COOL[1], GUIDE_COOL[1], 0.5),
+        lerp(TRAIL_COOL[2], GUIDE_COOL[2], 0.5)
+      ]
+      : [
+        lerp(TRAIL_WARM[0], GUIDE_WARM[0], 0.5),
+        lerp(TRAIL_WARM[1], GUIDE_WARM[1], 0.5),
+        lerp(TRAIL_WARM[2], GUIDE_WARM[2], 0.5)
+      ];
+    stroke(relationColor[0], relationColor[1], relationColor[2], alpha);
     strokeWeight(weight);
-    line(startX, startY, endX, endY);
+    noFill();
+    beginShape();
+    vertex(startX, startY);
+    quadraticVertex(cx, cy, endX, endY);
+    endShape();
 
     if (relation.strength > 0.22) {
       noStroke();
-      fill(255, alpha * 0.7);
-      ellipse(midX, midY, 1.4 + relation.strength * 2);
+      fill(relationColor[0], relationColor[1], relationColor[2], alpha * 0.72);
+      ellipse(cx, cy, 1.1 + relation.strength * 2.3);
     }
   }
 }
@@ -817,7 +922,8 @@ function drawProjectedTrail(vela) {
   let targetWidth = lerp(TRAIL_TARGET_PX, TRAIL_MAX_PX, speedTaper) * depthBoost;
   if (vela.trailWidthPx === undefined) vela.trailWidthPx = TRAIL_MAX_PX;
   vela.trailWidthPx = lerp(vela.trailWidthPx, targetWidth, TRAIL_WIDTH_LERP);
-  stroke(255, TRAIL_ALPHA * currProjection.alpha);
+  let colorMix = vela.polarity > 0 ? TRAIL_WARM : TRAIL_COOL;
+  stroke(colorMix[0], colorMix[1], colorMix[2], TRAIL_ALPHA * currProjection.alpha);
   strokeWeight(max(TRAIL_TARGET_PX, vela.trailWidthPx));
   line(
     prevProjection.screenX,
@@ -837,12 +943,13 @@ function drawProjectedBody(body, projection) {
     let scaleAmount = max(0, body.r - body.baseR);
     let scaleNorm = constrain(scaleAmount / max(body.baseR, 0.0001), 0, 1);
     let sunScaleAlpha = body.sunAlpha * (1 - scaleNorm * 0.65);
-    stroke(255, sunScaleAlpha);
+    stroke(SUN_STROKE[0], SUN_STROKE[1], SUN_STROKE[2], sunScaleAlpha);
     strokeWeight(1);
     noFill();
   } else {
     noStroke();
-    fill(255);
+    let bodyColor = body.polarity > 0 ? BODY_WARM : BODY_COOL;
+    fill(bodyColor[0], bodyColor[1], bodyColor[2]);
   }
   ellipse(0, 0, body.r * 2);
   drawingContext.globalAlpha = prevAlpha;
