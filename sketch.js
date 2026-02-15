@@ -79,6 +79,10 @@ const GUIDE_ARC_SWAY_RATE = 0.0012;
 const GUIDE_ARC_SWAY_PIXELS = 9;
 const RELATION_ARC_SWAY_RATE = 0.0022;
 const RELATION_ARC_SWAY_PIXELS = 8;
+const SCAFFOLD_RED = [255, 56, 56];
+const SCAFFOLD_EDGE_ALPHA = 148;
+const SCAFFOLD_INSET_ALPHA = 98;
+const SCAFFOLD_STRUT_ALPHA = 76;
 const VELA_INITIAL_SPEED = 1.12;
 const CAPTURE_DURATION_MS = 60000;
 const CAPTURE_FILENAME = 'helios-lattice-capture';
@@ -477,12 +481,13 @@ function applyMatrixConfinementForce(vela, nearestSystem, nearestSq, timeScale =
   let layerDelta = gridZ - vela.pos.z;
   vela.applyForce(createVector(0, 0, layerDelta * MATRIX_LAYER_LOCK * 0.02 * MATRIX_FORCE_SCALE * timeScale));
 
-  let minX = heliosMeta.startX - spacing * MATRIX_CAGE_MARGIN;
-  let maxX = heliosMeta.startX + spacing * (HELIOS_COLS - 1 + MATRIX_CAGE_MARGIN);
-  let minY = heliosMeta.startY - spacing * MATRIX_CAGE_MARGIN;
-  let maxY = heliosMeta.startY + spacing * (HELIOS_ROWS - 1 + MATRIX_CAGE_MARGIN);
-  let minZ = zStart - spacing * MATRIX_CAGE_MARGIN;
-  let maxZ = zStart + spacing * (HELIOS_DEPTH - 1 + MATRIX_CAGE_MARGIN);
+  let cageBounds = getMatrixCageBounds();
+  let minX = cageBounds.minX;
+  let maxX = cageBounds.maxX;
+  let minY = cageBounds.minY;
+  let maxY = cageBounds.maxY;
+  let minZ = cageBounds.minZ;
+  let maxZ = cageBounds.maxZ;
 
   let cageForce = createVector(0, 0, 0);
   if (vela.pos.x < minX) cageForce.x += (minX - vela.pos.x) * MATRIX_CAGE_STIFFNESS;
@@ -866,6 +871,7 @@ function drawHeliosSystems() {
     renderables.push({ body: system.sun, projection });
   }
 
+  drawScaffoldCube();
   drawLatticeGuides(projectionBySystem);
 
   for (let vela of velas) {
@@ -880,6 +886,94 @@ function drawHeliosSystems() {
   renderables.sort((a, b) => a.projection.depth - b.projection.depth);
   for (let entry of renderables) {
     drawProjectedBody(entry.body, entry.projection);
+  }
+}
+
+function drawScaffoldCube() {
+  let bounds = getMatrixCageBounds();
+  let corners = cubeCornersFromBounds(bounds);
+  let projected = new Map();
+  for (let [key, corner] of corners.entries()) {
+    projected.set(key, projectWorldPoint(corner.x, corner.y, corner.z));
+  }
+
+  let center = {
+    x: (bounds.minX + bounds.maxX) * 0.5,
+    y: (bounds.minY + bounds.maxY) * 0.5,
+    z: (bounds.minZ + bounds.maxZ) * 0.5
+  };
+  let insetCorners = new Map();
+  let insetFactor = 0.14;
+  for (let [key, corner] of corners.entries()) {
+    let inset = {
+      x: lerp(corner.x, center.x, insetFactor),
+      y: lerp(corner.y, center.y, insetFactor),
+      z: lerp(corner.z, center.z, insetFactor)
+    };
+    insetCorners.set(key, projectWorldPoint(inset.x, inset.y, inset.z));
+  }
+
+  drawCubeEdges(projected, SCAFFOLD_EDGE_ALPHA, 1.4);
+  drawCubeEdges(insetCorners, SCAFFOLD_INSET_ALPHA, 1.05);
+  drawCubeStruts(projected, insetCorners);
+}
+
+function getMatrixCageBounds() {
+  let spacing = heliosMeta.spacing;
+  let zStart = -heliosMeta.depthMid * spacing;
+  return {
+    minX: heliosMeta.startX - spacing * MATRIX_CAGE_MARGIN,
+    maxX: heliosMeta.startX + spacing * (HELIOS_COLS - 1 + MATRIX_CAGE_MARGIN),
+    minY: heliosMeta.startY - spacing * MATRIX_CAGE_MARGIN,
+    maxY: heliosMeta.startY + spacing * (HELIOS_ROWS - 1 + MATRIX_CAGE_MARGIN),
+    minZ: zStart - spacing * MATRIX_CAGE_MARGIN,
+    maxZ: zStart + spacing * (HELIOS_DEPTH - 1 + MATRIX_CAGE_MARGIN)
+  };
+}
+
+function cubeCornersFromBounds(bounds) {
+  return new Map([
+    ['nbl', { x: bounds.minX, y: bounds.minY, z: bounds.minZ }],
+    ['nbr', { x: bounds.maxX, y: bounds.minY, z: bounds.minZ }],
+    ['ntl', { x: bounds.minX, y: bounds.maxY, z: bounds.minZ }],
+    ['ntr', { x: bounds.maxX, y: bounds.maxY, z: bounds.minZ }],
+    ['fbl', { x: bounds.minX, y: bounds.minY, z: bounds.maxZ }],
+    ['fbr', { x: bounds.maxX, y: bounds.minY, z: bounds.maxZ }],
+    ['ftl', { x: bounds.minX, y: bounds.maxY, z: bounds.maxZ }],
+    ['ftr', { x: bounds.maxX, y: bounds.maxY, z: bounds.maxZ }]
+  ]);
+}
+
+function cubeEdgePairs() {
+  return [
+    ['nbl', 'nbr'], ['nbr', 'ntr'], ['ntr', 'ntl'], ['ntl', 'nbl'],
+    ['fbl', 'fbr'], ['fbr', 'ftr'], ['ftr', 'ftl'], ['ftl', 'fbl'],
+    ['nbl', 'fbl'], ['nbr', 'fbr'], ['ntl', 'ftl'], ['ntr', 'ftr']
+  ];
+}
+
+function drawCubeEdges(projectedCorners, alphaBase, weightBase) {
+  for (let pair of cubeEdgePairs()) {
+    let a = projectedCorners.get(pair[0]);
+    let b = projectedCorners.get(pair[1]);
+    if (!a || !b) continue;
+    let edgeAlpha = alphaBase * ((a.alpha + b.alpha) * 0.5);
+    let edgeWeight = weightBase * ((a.scale + b.scale) * 0.5);
+    stroke(SCAFFOLD_RED[0], SCAFFOLD_RED[1], SCAFFOLD_RED[2], edgeAlpha);
+    strokeWeight(edgeWeight);
+    line(a.screenX, a.screenY, b.screenX, b.screenY);
+  }
+}
+
+function drawCubeStruts(outerCorners, innerCorners) {
+  for (let [key, outer] of outerCorners.entries()) {
+    let inner = innerCorners.get(key);
+    if (!inner) continue;
+    let alpha = SCAFFOLD_STRUT_ALPHA * ((outer.alpha + inner.alpha) * 0.5);
+    let weight = 0.75 * ((outer.scale + inner.scale) * 0.5);
+    stroke(SCAFFOLD_RED[0], SCAFFOLD_RED[1], SCAFFOLD_RED[2], alpha);
+    strokeWeight(weight);
+    line(outer.screenX, outer.screenY, inner.screenX, inner.screenY);
   }
 }
 
