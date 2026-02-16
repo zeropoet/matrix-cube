@@ -107,6 +107,8 @@ const MOBILE_LAYOUT_MAX_WIDTH = 900;
 const MOBILE_CENTER_FIT_WIDTH_RATIO = 0.94;
 const MOBILE_CENTER_FIT_HEIGHT_RATIO = 0.9;
 const MOBILE_REPO_SQUARE_MIN = 42;
+const MOBILE_REPO_SQUARE_ABSOLUTE_MIN = 28;
+const MOBILE_REPO_SQUARE_TIGHT_RATIO = 0.78;
 const DRAG_ROTATION_SENSITIVITY = 0.005;
 const DRAG_PITCH_LIMIT = Math.PI * 0.43;
 
@@ -278,8 +280,17 @@ function computeLatticeSpacing(rows, cols) {
   let heightFitSpacing = (height * MOBILE_CENTER_FIT_HEIGHT_RATIO) / cageSpanRows;
   let fitSpacing = Math.min(widthFitSpacing, heightFitSpacing);
   let maxSpacing = baseSpacing * 1.35;
+  let perCellSpace = Math.min(
+    (width * MOBILE_CENTER_FIT_WIDTH_RATIO) / cols,
+    (height * MOBILE_CENTER_FIT_HEIGHT_RATIO) / rows
+  );
+  let adaptiveMinSpacing = constrain(
+    perCellSpace * MOBILE_REPO_SQUARE_TIGHT_RATIO,
+    MOBILE_REPO_SQUARE_ABSOLUTE_MIN,
+    MOBILE_REPO_SQUARE_MIN
+  );
 
-  return constrain(fitSpacing, MOBILE_REPO_SQUARE_MIN, maxSpacing);
+  return constrain(fitSpacing, adaptiveMinSpacing, maxSpacing);
 }
 
 function isMobileViewport() {
