@@ -3,10 +3,7 @@ html, body {
     height: 100%;
     margin: 0;
     overflow: hidden;
-    background:
-      radial-gradient(circle at 20% 20%, #263d5c 0%, rgba(38, 61, 92, 0) 38%),
-      radial-gradient(circle at 82% 78%, #5b2f4b 0%, rgba(91, 47, 75, 0) 40%),
-      linear-gradient(160deg, #0b1420 0%, #0f1c2c 45%, #11192a 100%);
+    background: #000;
     color: #f2e9db;
     font-family: "Avenir Next", "Trebuchet MS", "Gill Sans", sans-serif;
     position: relative;

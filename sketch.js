@@ -83,6 +83,10 @@ const NIGHT_START_HOUR = 20;
 const NIGHT_END_HOUR = 6;
 const GUIDE_ARC_SWAY_RATE = 0.0012;
 const GUIDE_ARC_SWAY_PIXELS = 9;
+const GUIDE_CENTER_WINDOW_RADIUS = 0.28;
+const GUIDE_CENTER_SNAP_STEP = 16;
+const GUIDE_CENTER_SNAP_BLEND = 0.9;
+const GUIDE_CENTER_CLICK_THRESHOLD = 0.22;
 const RELATION_ARC_SWAY_RATE = 0.0022;
 const RELATION_ARC_SWAY_PIXELS = 8;
 const SCAFFOLD_RED = [255, 56, 56];
@@ -1048,8 +1052,10 @@ function drawLatticeGuides(projectionBySystem) {
 
 function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed = 0) {
   if (!aProj || !bProj) return;
-  let dx = bProj.screenX - aProj.screenX;
-  let dy = bProj.screenY - aProj.screenY;
+  let snappedA = applyCenterWindowGuideSnap(aProj, seed * 1.31 + 7);
+  let snappedB = applyCenterWindowGuideSnap(bProj, seed * 0.79 + 19);
+  let dx = snappedB.screenX - snappedA.screenX;
+  let dy = snappedB.screenY - snappedA.screenY;
   let length = sqrt(dx * dx + dy * dy);
   if (length < 2) return;
 
@@ -1075,21 +1081,52 @@ function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed =
   noFill();
 
   if (!isDepthBridge) {
-    line(aProj.screenX, aProj.screenY, bProj.screenX, bProj.screenY);
+    line(snappedA.screenX, snappedA.screenY, snappedB.screenX, snappedB.screenY);
     return;
   }
 
-  let midX = (aProj.screenX + bProj.screenX) * 0.5;
-  let midY = (aProj.screenY + bProj.screenY) * 0.5;
+  let midX = (snappedA.screenX + snappedB.screenX) * 0.5;
+  let midY = (snappedA.screenY + snappedB.screenY) * 0.5;
   let nx = -dy / length;
   let ny = dx / length;
   let swayPhase = simulationTimeMs() * GUIDE_ARC_SWAY_RATE + seed * 0.00037;
   let sway = sin(swayPhase) * GUIDE_ARC_SWAY_PIXELS * (0.45 + layerNorm * 0.9);
   let bow = (min(24, length * 0.18) * (0.4 + layerNorm * 0.9)) + sway;
   beginShape();
-  vertex(aProj.screenX, aProj.screenY);
-  quadraticVertex(midX + nx * bow, midY + ny * bow, bProj.screenX, bProj.screenY);
+  vertex(snappedA.screenX, snappedA.screenY);
+  quadraticVertex(midX + nx * bow, midY + ny * bow, snappedB.screenX, snappedB.screenY);
   endShape();
+}
+
+function applyCenterWindowGuideSnap(proj, seed = 0) {
+  let centerX = width * 0.5;
+  let centerY = height * 0.5;
+  let localX = proj.screenX - centerX;
+  let localY = proj.screenY - centerY;
+  let radial = sqrt(localX * localX + localY * localY);
+  let windowRadius = min(width, height) * GUIDE_CENTER_WINDOW_RADIUS;
+  if (windowRadius <= 0) return proj;
+
+  let zoneT = 1 - constrain((radial - windowRadius * 0.2) / (windowRadius * 0.95), 0, 1);
+  if (zoneT <= 0.001) return proj;
+
+  let quantX = Math.round(localX / GUIDE_CENTER_SNAP_STEP) * GUIDE_CENTER_SNAP_STEP;
+  let quantY = Math.round(localY / GUIDE_CENTER_SNAP_STEP) * GUIDE_CENTER_SNAP_STEP;
+  let clickThreshold = GUIDE_CENTER_SNAP_STEP * (GUIDE_CENTER_CLICK_THRESHOLD + zoneT * 0.2);
+  let blend = GUIDE_CENTER_SNAP_BLEND * zoneT;
+
+  let snappedX = abs(quantX - localX) <= clickThreshold
+    ? quantX
+    : lerp(localX, quantX, blend);
+  let snappedY = abs(quantY - localY) <= clickThreshold
+    ? quantY
+    : lerp(localY, quantY, blend);
+
+  return {
+    ...proj,
+    screenX: centerX + snappedX,
+    screenY: centerY + snappedY
+  };
 }
 
 function drawVelaRelations(projectionByVela) {
