@@ -103,6 +103,12 @@ const VIDEO_CAPTURE_FORMATS = [
   { mimeType: 'video/mp4' }
 ];
 const CAPTURE_DURATION_SECONDS = CAPTURE_DURATION_MS / 1000;
+const MOBILE_LAYOUT_MAX_WIDTH = 900;
+const MOBILE_CENTER_FIT_WIDTH_RATIO = 0.94;
+const MOBILE_CENTER_FIT_HEIGHT_RATIO = 0.9;
+const MOBILE_REPO_SQUARE_MIN = 42;
+const DRAG_ROTATION_SENSITIVITY = 0.005;
+const DRAG_PITCH_LIMIT = Math.PI * 0.43;
 
 let runtimeTimeSpeed = TIME_SPEED_FACTOR;
 let runtimeQuantumStrength = QUANTUM_REORIENTATION_STRENGTH;
@@ -115,6 +121,15 @@ let captureProgressStatus = null;
 let captureHideTimer = null;
 let visualTheme = null;
 let relationEchoLastRefreshMs = null;
+let rotationDragState = {
+  active: false,
+  pointerId: null,
+  lastX: 0,
+  lastY: 0
+};
+let rotationYawOffset = 0;
+let rotationPitchOffset = 0;
+let interactionHandlersBound = false;
 
 function setup() {
   applyPixelDensity();
@@ -126,6 +141,7 @@ function setup() {
   cnv.style('top', '0');
   cnv.style('left', '0');
   cnv.style('pointer-events', 'none');
+  bindInteractionHandlers();
   refreshVisualTheme();
   background(...visualTheme.background);
   initializeHelios();
@@ -216,7 +232,7 @@ function applyPixelDensity() {
 
 function createHeliosLattice(rows, cols, depth) {
   let lattice = [];
-  let spacing = Math.min(width / (cols + 1), height / (rows + 1));
+  let spacing = computeLatticeSpacing(rows, cols);
   heliosMeta.spacing = spacing;
   heliosMeta.depthMid = (depth - 1) / 2;
   heliosMeta.depthScale = spacing * 3.5;
@@ -246,6 +262,28 @@ function createHeliosLattice(rows, cols, depth) {
     lattice.push(layer);
   }
   return lattice;
+}
+
+function computeLatticeSpacing(rows, cols) {
+  let baseSpacing = Math.min(width / (cols + 1), height / (rows + 1));
+  if (!isMobileViewport()) {
+    return baseSpacing;
+  }
+
+  // Fit the center scaffold square to viewport width on mobile while
+  // allowing each lattice cell ("repo square") to resize with available space.
+  let cageSpanCols = (cols - 1) + MATRIX_CAGE_MARGIN * 2;
+  let cageSpanRows = (rows - 1) + MATRIX_CAGE_MARGIN * 2;
+  let widthFitSpacing = (width * MOBILE_CENTER_FIT_WIDTH_RATIO) / cageSpanCols;
+  let heightFitSpacing = (height * MOBILE_CENTER_FIT_HEIGHT_RATIO) / cageSpanRows;
+  let fitSpacing = Math.min(widthFitSpacing, heightFitSpacing);
+  let maxSpacing = baseSpacing * 1.35;
+
+  return constrain(fitSpacing, MOBILE_REPO_SQUARE_MIN, maxSpacing);
+}
+
+function isMobileViewport() {
+  return width <= MOBILE_LAYOUT_MAX_WIDTH;
 }
 
 function createHeliosSystem(bounds, sunX, sunY, zIndex, rowIndex, colIndex) {
@@ -661,6 +699,91 @@ function simulationTimeScale() {
   return constrain(runtimeTimeSpeed, 0.1, 2.5);
 }
 
+function bindInteractionHandlers() {
+  if (interactionHandlersBound) return;
+  interactionHandlersBound = true;
+  document.body.style.touchAction = 'none';
+
+  window.addEventListener('mousedown', event => {
+    beginRotationDrag(event.clientX, event.clientY, 'mouse');
+  });
+
+  window.addEventListener('mousemove', event => {
+    updateRotationDrag(event.clientX, event.clientY, 'mouse');
+  });
+
+  window.addEventListener('mouseup', () => {
+    endRotationDrag('mouse');
+  });
+
+  window.addEventListener('mouseleave', () => {
+    endRotationDrag('mouse');
+  });
+
+  window.addEventListener('touchstart', event => {
+    if (!event.changedTouches || event.changedTouches.length === 0) return;
+    let touch = event.changedTouches[0];
+    beginRotationDrag(touch.clientX, touch.clientY, touch.identifier);
+    event.preventDefault();
+  }, { passive: false });
+
+  window.addEventListener('touchmove', event => {
+    if (!rotationDragState.active) return;
+    for (let touch of event.changedTouches) {
+      if (touch.identifier === rotationDragState.pointerId) {
+        updateRotationDrag(touch.clientX, touch.clientY, touch.identifier);
+        event.preventDefault();
+        break;
+      }
+    }
+  }, { passive: false });
+
+  window.addEventListener('touchend', event => {
+    for (let touch of event.changedTouches) {
+      if (touch.identifier === rotationDragState.pointerId) {
+        endRotationDrag(touch.identifier);
+        break;
+      }
+    }
+  });
+
+  window.addEventListener('touchcancel', event => {
+    for (let touch of event.changedTouches) {
+      if (touch.identifier === rotationDragState.pointerId) {
+        endRotationDrag(touch.identifier);
+        break;
+      }
+    }
+  });
+}
+
+function beginRotationDrag(clientX, clientY, pointerId) {
+  rotationDragState.active = true;
+  rotationDragState.pointerId = pointerId;
+  rotationDragState.lastX = clientX;
+  rotationDragState.lastY = clientY;
+}
+
+function updateRotationDrag(clientX, clientY, pointerId) {
+  if (!rotationDragState.active) return;
+  if (rotationDragState.pointerId !== pointerId) return;
+  let dx = clientX - rotationDragState.lastX;
+  let dy = clientY - rotationDragState.lastY;
+  rotationDragState.lastX = clientX;
+  rotationDragState.lastY = clientY;
+
+  rotationYawOffset += dx * DRAG_ROTATION_SENSITIVITY;
+  rotationPitchOffset -= dy * DRAG_ROTATION_SENSITIVITY;
+  rotationPitchOffset = constrain(rotationPitchOffset, -DRAG_PITCH_LIMIT, DRAG_PITCH_LIMIT);
+}
+
+function endRotationDrag(pointerId) {
+  if (!rotationDragState.active) return;
+  if (rotationDragState.pointerId !== pointerId) return;
+  rotationDragState.active = false;
+  rotationDragState.pointerId = null;
+}
+
 function keyPressed() {
   if (key === 'g' || key === 'G') captureMov();
 }
@@ -885,8 +1008,8 @@ function projectWorldPoint(x, y, z) {
   let y0 = y - centerY;
   let z0 = z;
   let t = simulationTimeMs();
-  let yaw = t * HELIOS_YAW_SPEED;
-  let pitch = t * HELIOS_PITCH_SPEED;
+  let yaw = t * HELIOS_YAW_SPEED + rotationYawOffset;
+  let pitch = t * HELIOS_PITCH_SPEED + rotationPitchOffset;
   let cosY = Math.cos(yaw);
   let sinY = Math.sin(yaw);
   let cosP = Math.cos(pitch);
