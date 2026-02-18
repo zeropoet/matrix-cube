@@ -13,6 +13,19 @@ canvas {
     display: block;
 }
 
+#centerLogo {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: clamp(120px, 18vw, 260px);
+    height: auto;
+    transform: translate(-50%, -50%);
+    z-index: 20;
+    pointer-events: none;
+    filter: invert(var(--logo-invert, 1));
+    opacity: 0.92;
+}
+
 body::before {
     content: "";
     position: fixed;

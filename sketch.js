@@ -12,15 +12,46 @@ let heliosMeta = {
   startY: 0
 };
 
-const TOTAL_VELA_COUNT = 212;
-const VELA_MASS_MIN = 5;
-const VELA_MASS_MAX = 10;
-const BACKGROUND_DAY = [12, 16, 30];
+const VELA_GROUPS = [
+  { name: 'Import Modules', count: 9 },
+  { name: 'The Library', count: 4 },
+  { name: 'The Archive', count: 50 },
+  { name: 'The Stacks', count: 10 },
+  { name: 'The Something', count: 2 },
+  { name: 'A.Lion', count: 6 },
+  { name: 'The Ovel Node', count: 7 },
+  { name: 'Pæce', count: 3 },
+  { name: 'The Ritual', count: 15 },
+  { name: 'RWL', count: 33 },
+  { name: 'Hært', count: 40 },
+  { name: 'The Void Architecture', count: 43 }
+];
+const VELA_GROUP_COLORS = {
+  'The Library': [255, 0, 0],
+  'The Archive': [0, 87, 255],
+  'The Stacks': [0, 176, 80],
+  'The Something': [255, 140, 0],
+  'A.Lion': [128, 0, 255],
+  'The Ovel Node': [0, 128, 128],
+  'Pæce': [255, 215, 0],
+  'The Ritual': [139, 0, 0],
+  'RWL': [255, 20, 147],
+  'Hært': [0, 206, 209],
+  'The Void Architecture': [75, 0, 130],
+  'Import Modules': [34, 139, 34]
+};
+const TOTAL_VELA_COUNT = VELA_GROUPS.reduce((sum, group) => sum + group.count, 0);
+const VELA_MASS_MIN = 8;
+const VELA_MASS_MAX = 16;
+const BACKGROUND_DAY = [255, 255, 255];
 const BACKGROUND_NIGHT = [0, 0, 0];
-const SUN_MASS = 1;
+const SUN_MASS = 2;
 const HELIOS_ROWS = 4;
 const HELIOS_COLS = 4;
 const HELIOS_DEPTH = 4;
+const CAMERA_DEPTH_MULTIPLIER = 5.4;
+const CAMERA_PERSPECTIVE_MIN = 0.82;
+const CAMERA_PERSPECTIVE_MAX = 1.18;
 const TIME_SPEED_FACTOR = 0.25;
 const HELIOS_YAW_SPEED = 0.000045;
 const HELIOS_PITCH_SPEED = 0.00003;
@@ -68,15 +99,15 @@ const TRAIL_TARGET_PX = 1;
 const TRAIL_MAX_PX = 1.5;
 const TRAIL_SPEED_FOR_MAX = 24;
 const TRAIL_WIDTH_LERP = 0.34;
-const TRAIL_ALPHA = 132;
-const TRAIL_WARM_DAY = [255, 193, 120];
-const TRAIL_COOL_DAY = [126, 208, 255];
-const BODY_WARM_DAY = [255, 220, 166];
-const BODY_COOL_DAY = [155, 226, 255];
-const SUN_STROKE_DAY = [245, 240, 219];
-const GUIDE_WARM_DAY = [255, 171, 129];
-const GUIDE_COOL_DAY = [111, 194, 255];
-const GUIDE_LAYER_DAY = [156, 235, 192];
+const TRAIL_ALPHA = 182;
+const TRAIL_WARM_DAY = [255, 96, 0];
+const TRAIL_COOL_DAY = [0, 212, 255];
+const BODY_WARM_DAY = [255, 144, 0];
+const BODY_COOL_DAY = [0, 240, 255];
+const SUN_STROKE_DAY = [255, 255, 255];
+const GUIDE_WARM_DAY = [255, 64, 48];
+const GUIDE_COOL_DAY = [0, 136, 255];
+const GUIDE_LAYER_DAY = [0, 255, 128];
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 18;
 const NIGHT_START_HOUR = 20;
@@ -89,6 +120,8 @@ const GUIDE_CENTER_SNAP_BLEND = 0.9;
 const GUIDE_CENTER_CLICK_THRESHOLD = 0.22;
 const RELATION_ARC_SWAY_RATE = 0.0022;
 const RELATION_ARC_SWAY_PIXELS = 8;
+const GUIDE_NODE_DENSITY_NORM = 1.4;
+const GUIDE_SCALE_SMOOTHING = 0.34;
 const SCAFFOLD_RED = [255, 56, 56];
 const SCAFFOLD_EDGE_ALPHA = 148;
 const SCAFFOLD_INSET_ALPHA = 98;
@@ -122,6 +155,7 @@ let captureProgressLabel = null;
 let captureProgressStatus = null;
 let captureHideTimer = null;
 let visualTheme = null;
+let centerLogoElement = null;
 let relationEchoLastRefreshMs = null;
 let rotationDragState = {
   active: false,
@@ -132,9 +166,13 @@ let rotationDragState = {
 let rotationYawOffset = 0;
 let rotationPitchOffset = 0;
 let interactionHandlersBound = false;
+let guideXScale = [];
+let guideYScale = [];
+let guideZScale = [];
 
 function setup() {
   applyPixelDensity();
+  centerLogoElement = document.getElementById('centerLogo');
   cnv = createCanvas(windowWidth, windowHeight);
   strokeCap(ROUND);
   cnv.position(0, 0);
@@ -166,15 +204,23 @@ function initializeHelios() {
   heliosLattice = createHeliosLattice(HELIOS_ROWS, HELIOS_COLS, HELIOS_DEPTH);
   heliosSystems = flattenLattice(heliosLattice);
   let spawnField = createWeightField(HELIOS_COLS, HELIOS_ROWS, HELIOS_DEPTH);
-  velas = createDistributedVelas(heliosLattice, spawnField, TOTAL_VELA_COUNT);
+  velas = createDistributedVelas(heliosLattice, spawnField, VELA_GROUPS);
+  resetGuideScales();
   relationEchoes.clear();
   relationEchoLastRefreshMs = null;
 }
 
 function refreshVisualTheme() {
   let hour = localHourFloat();
-  let dayFactor = dayColorFactor(hour);
-  visualTheme = createVisualTheme(dayFactor);
+  let logoDayFactor = dayColorFactor(hour);
+  visualTheme = createVisualTheme();
+  syncLogoTheme(logoDayFactor);
+}
+
+function syncLogoTheme(dayFactor) {
+  if (!centerLogoElement) return;
+  let logoInvert = 1 - dayFactor;
+  centerLogoElement.style.setProperty('--logo-invert', logoInvert.toFixed(3));
 }
 
 function localHourFloat() {
@@ -198,18 +244,18 @@ function smoothstep(t) {
   return x * x * (3 - 2 * x);
 }
 
-function createVisualTheme(dayFactor) {
+function createVisualTheme() {
   return {
-    dayFactor,
-    background: colorByDayFactor(BACKGROUND_DAY, dayFactor, BACKGROUND_NIGHT),
-    trailWarm: colorByDayFactor(TRAIL_WARM_DAY, dayFactor),
-    trailCool: colorByDayFactor(TRAIL_COOL_DAY, dayFactor),
-    bodyWarm: colorByDayFactor(BODY_WARM_DAY, dayFactor),
-    bodyCool: colorByDayFactor(BODY_COOL_DAY, dayFactor),
-    sunStroke: colorByDayFactor(SUN_STROKE_DAY, dayFactor),
-    guideWarm: colorByDayFactor(GUIDE_WARM_DAY, dayFactor),
-    guideCool: colorByDayFactor(GUIDE_COOL_DAY, dayFactor),
-    guideLayer: colorByDayFactor(GUIDE_LAYER_DAY, dayFactor)
+    dayFactor: 0,
+    background: [...BACKGROUND_NIGHT],
+    trailWarm: [...TRAIL_WARM_DAY],
+    trailCool: [...TRAIL_COOL_DAY],
+    bodyWarm: [...BODY_WARM_DAY],
+    bodyCool: [...BODY_COOL_DAY],
+    sunStroke: [...SUN_STROKE_DAY],
+    guideWarm: [...GUIDE_WARM_DAY],
+    guideCool: [...GUIDE_COOL_DAY],
+    guideLayer: [...GUIDE_LAYER_DAY]
   };
 }
 
@@ -237,7 +283,7 @@ function createHeliosLattice(rows, cols, depth) {
   let spacing = computeLatticeSpacing(rows, cols);
   heliosMeta.spacing = spacing;
   heliosMeta.depthMid = (depth - 1) / 2;
-  heliosMeta.depthScale = spacing * 3.5;
+  heliosMeta.depthScale = spacing * CAMERA_DEPTH_MULTIPLIER;
   let totalSpanX = spacing * (cols - 1);
   let totalSpanY = spacing * (rows - 1);
   let startX = (width - totalSpanX) / 2;
@@ -324,20 +370,25 @@ function flattenLattice(lattice) {
   return flat;
 }
 
-function createDistributedVelas(lattice, field, count) {
+function createDistributedVelas(lattice, field, groups) {
   let allVelas = [];
   let zJitter = heliosMeta.spacing * 0.5;
-  for (let i = 0; i < count; i++) {
-    let voxel = pickWeightedVoxel(field);
-    let system = lattice[voxel.z][voxel.y][voxel.x];
-    let x = random(system.bounds.x, system.bounds.x + system.bounds.w);
-    let y = random(system.bounds.y, system.bounds.y + system.bounds.h);
-    let z = system.origin.z + random(-zJitter, zJitter);
-    let v = p5.Vector.random3D();
-    v.mult(VELA_INITIAL_SPEED);
-    let m = random(VELA_MASS_MIN, VELA_MASS_MAX);
-    let polarity = random() > 0.5 ? 1 : -1;
-    allVelas.push(new Vela(x, y, v.x, v.y, m, false, z, v.z, polarity));
+  for (let group of groups) {
+    for (let i = 0; i < group.count; i++) {
+      let voxel = pickWeightedVoxel(field);
+      let system = lattice[voxel.z][voxel.y][voxel.x];
+      let x = random(system.bounds.x, system.bounds.x + system.bounds.w);
+      let y = random(system.bounds.y, system.bounds.y + system.bounds.h);
+      let z = system.origin.z + random(-zJitter, zJitter);
+      let v = p5.Vector.random3D();
+      v.mult(VELA_INITIAL_SPEED);
+      let m = random(VELA_MASS_MIN, VELA_MASS_MAX);
+      let polarity = random() > 0.5 ? 1 : -1;
+      let vela = new Vela(x, y, v.x, v.y, m, false, z, v.z, polarity);
+      vela.groupName = group.name;
+      vela.groupColor = VELA_GROUP_COLORS[group.name] || null;
+      allVelas.push(vela);
+    }
   }
   return allVelas;
 }
@@ -423,6 +474,103 @@ function updateHeliosPhysics() {
 
   for (let vela of velas) {
     vela.update(timeScale);
+  }
+  updateGuideScales();
+}
+
+function resetGuideScales() {
+  guideXScale = Array.from(
+    { length: HELIOS_DEPTH },
+    () => Array.from(
+      { length: HELIOS_ROWS },
+      () => new Array(max(0, HELIOS_COLS - 1)).fill(0)
+    )
+  );
+  guideYScale = Array.from(
+    { length: HELIOS_DEPTH },
+    () => Array.from(
+      { length: max(0, HELIOS_ROWS - 1) },
+      () => new Array(HELIOS_COLS).fill(0)
+    )
+  );
+  guideZScale = Array.from(
+    { length: max(0, HELIOS_DEPTH - 1) },
+    () => Array.from(
+      { length: HELIOS_ROWS },
+      () => new Array(HELIOS_COLS).fill(0)
+    )
+  );
+}
+
+function updateGuideScales() {
+  if (guideXScale.length === 0 && guideYScale.length === 0 && guideZScale.length === 0) return;
+  let spacing = heliosMeta.spacing;
+  let zStart = -heliosMeta.depthMid * spacing;
+  let nodeDensity = Array.from(
+    { length: HELIOS_DEPTH },
+    () => Array.from(
+      { length: HELIOS_ROWS },
+      () => new Array(HELIOS_COLS).fill(0)
+    )
+  );
+
+  for (let vela of velas) {
+    let fx = (vela.pos.x - heliosMeta.startX) / spacing;
+    let fy = (vela.pos.y - heliosMeta.startY) / spacing;
+    let fz = (vela.pos.z - zStart) / spacing;
+    let x0 = Math.floor(fx);
+    let y0 = Math.floor(fy);
+    let z0 = Math.floor(fz);
+    let tx = fx - x0;
+    let ty = fy - y0;
+    let tz = fz - z0;
+
+    for (let dz = 0; dz <= 1; dz++) {
+      for (let dy = 0; dy <= 1; dy++) {
+        for (let dx = 0; dx <= 1; dx++) {
+          let ix = x0 + dx;
+          let iy = y0 + dy;
+          let iz = z0 + dz;
+          if (ix < 0 || ix >= HELIOS_COLS) continue;
+          if (iy < 0 || iy >= HELIOS_ROWS) continue;
+          if (iz < 0 || iz >= HELIOS_DEPTH) continue;
+          let wx = dx === 0 ? (1 - tx) : tx;
+          let wy = dy === 0 ? (1 - ty) : ty;
+          let wz = dz === 0 ? (1 - tz) : tz;
+          nodeDensity[iz][iy][ix] += wx * wy * wz;
+        }
+      }
+    }
+  }
+
+  for (let z = 0; z < HELIOS_DEPTH; z++) {
+    for (let row = 0; row < HELIOS_ROWS; row++) {
+      for (let col = 0; col < HELIOS_COLS - 1; col++) {
+        let density = (nodeDensity[z][row][col] + nodeDensity[z][row][col + 1]) * 0.5;
+        let target = constrain(density / GUIDE_NODE_DENSITY_NORM, 0, 1);
+        guideXScale[z][row][col] = lerp(guideXScale[z][row][col], target, GUIDE_SCALE_SMOOTHING);
+      }
+    }
+  }
+
+  for (let z = 0; z < HELIOS_DEPTH; z++) {
+    for (let row = 0; row < HELIOS_ROWS - 1; row++) {
+      for (let col = 0; col < HELIOS_COLS; col++) {
+        let density = (nodeDensity[z][row][col] + nodeDensity[z][row + 1][col]) * 0.5;
+        let target = constrain(density / GUIDE_NODE_DENSITY_NORM, 0, 1);
+        guideYScale[z][row][col] = lerp(guideYScale[z][row][col], target, GUIDE_SCALE_SMOOTHING);
+      }
+    }
+  }
+
+  for (let z = 0; z < HELIOS_DEPTH - 1; z++) {
+    for (let row = 0; row < HELIOS_ROWS; row++) {
+      for (let col = 0; col < HELIOS_COLS; col++) {
+        let density = (nodeDensity[z][row][col] + nodeDensity[z + 1][row][col]) * 0.5;
+        let target = constrain(density / GUIDE_NODE_DENSITY_NORM, 0, 1);
+        guideZScale[z][row][col] = lerp(guideZScale[z][row][col], target, GUIDE_SCALE_SMOOTHING);
+      }
+    }
   }
 }
 
@@ -1031,7 +1179,7 @@ function projectWorldPoint(x, y, z) {
   let z2 = y0 * sinP + z1 * cosP;
   let depthScale = heliosMeta.depthScale || 1;
   let perspective = depthScale / (depthScale - z2);
-  perspective = constrain(perspective, 0.7, 1.3);
+  perspective = constrain(perspective, CAMERA_PERSPECTIVE_MIN, CAMERA_PERSPECTIVE_MAX);
   let screenX = centerX + x1 * perspective;
   let screenY = centerY + y2 * perspective;
   let alpha = constrain(1 - (z2 / (depthScale * 2.5)), 0.5, 1);
@@ -1165,26 +1313,29 @@ function drawLatticeGuides(projectionBySystem) {
         if (!from) continue;
 
         if (c + 1 < HELIOS_COLS) {
+          let strength = 0.24 + guideXScale[z][r][c] * 1.34;
           let to = projectionBySystem.get(heliosLattice[z][r][c + 1]);
           let seed = (z * 92821) ^ (r * 68917) ^ (c * 2833) ^ 41;
-          drawGuideSegment(from, to, layerNorm, false, seed);
+          drawGuideSegment(from, to, layerNorm, false, seed, strength);
         }
         if (r + 1 < HELIOS_ROWS) {
+          let strength = 0.24 + guideYScale[z][r][c] * 1.34;
           let to = projectionBySystem.get(heliosLattice[z][r + 1][c]);
           let seed = (z * 11789) ^ (r * 52183) ^ (c * 3643) ^ 73;
-          drawGuideSegment(from, to, layerNorm, false, seed);
+          drawGuideSegment(from, to, layerNorm, false, seed, strength);
         }
         if (z + 1 < HELIOS_DEPTH) {
+          let strength = 0.24 + guideZScale[z][r][c] * 1.34;
           let to = projectionBySystem.get(heliosLattice[z + 1][r][c]);
           let seed = (z * 45613) ^ (r * 19391) ^ (c * 8191) ^ 101;
-          drawGuideSegment(from, to, layerNorm, true, seed);
+          drawGuideSegment(from, to, layerNorm, true, seed, strength);
         }
       }
     }
   }
 }
 
-function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed = 0) {
+function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed = 0, strength = 1) {
   if (!aProj || !bProj) return;
   let snappedA = applyCenterWindowGuideSnap(aProj, seed * 1.31 + 7);
   let snappedB = applyCenterWindowGuideSnap(bProj, seed * 0.79 + 19);
@@ -1194,9 +1345,10 @@ function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed =
   if (length < 2) return;
 
   let alphaBase = isDepthBridge ? 46 : 58;
-  let alpha = alphaBase * ((aProj.alpha + bProj.alpha) * 0.5) * (0.8 + layerNorm * 0.35);
+  let alpha = alphaBase * ((aProj.alpha + bProj.alpha) * 0.5) * (0.8 + layerNorm * 0.35) * strength;
   let weight = isDepthBridge ? 0.9 : 1.1;
   weight *= (aProj.scale + bProj.scale) * 0.5;
+  weight *= 0.75 + strength * 0.65;
   let lerpT = isDepthBridge ? 0.65 : 0.5;
   let lineColor = isDepthBridge
     ? [
@@ -1347,7 +1499,7 @@ function drawProjectedTrail(vela) {
   let targetWidth = lerp(TRAIL_TARGET_PX, TRAIL_MAX_PX, speedTaper) * depthBoost;
   if (vela.trailWidthPx === undefined) vela.trailWidthPx = TRAIL_MAX_PX;
   vela.trailWidthPx = lerp(vela.trailWidthPx, targetWidth, TRAIL_WIDTH_LERP);
-  let colorMix = vela.polarity > 0 ? visualTheme.trailWarm : visualTheme.trailCool;
+  let colorMix = vela.groupColor || (vela.polarity > 0 ? visualTheme.trailWarm : visualTheme.trailCool);
   stroke(colorMix[0], colorMix[1], colorMix[2], TRAIL_ALPHA * currProjection.alpha);
   strokeWeight(max(TRAIL_TARGET_PX, vela.trailWidthPx));
   line(
@@ -1373,7 +1525,7 @@ function drawProjectedBody(body, projection) {
     noFill();
   } else {
     noStroke();
-    let bodyColor = body.polarity > 0 ? visualTheme.bodyWarm : visualTheme.bodyCool;
+    let bodyColor = body.groupColor || (body.polarity > 0 ? visualTheme.bodyWarm : visualTheme.bodyCool);
     fill(bodyColor[0], bodyColor[1], bodyColor[2]);
   }
   ellipse(0, 0, body.r * 2);
