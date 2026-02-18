@@ -44,7 +44,6 @@ const TOTAL_VELA_COUNT = VELA_GROUPS.reduce((sum, group) => sum + group.count, 0
 const VELA_MASS_MIN = 8;
 const VELA_MASS_MAX = 16;
 const BACKGROUND_DAY = [255, 255, 255];
-const BACKGROUND_NIGHT = [0, 0, 0];
 const SUN_MASS = 2;
 const HELIOS_ROWS = 4;
 const HELIOS_COLS = 4;
@@ -58,21 +57,21 @@ const HELIOS_PITCH_SPEED = 0.0002;
 const VELA_NEIGHBOR_RADIUS = 100;
 const VELA_NEIGHBOR_RADIUS_SQ = VELA_NEIGHBOR_RADIUS * VELA_NEIGHBOR_RADIUS;
 const VELA_HASH_CELL_SIZE = VELA_NEIGHBOR_RADIUS;
-const VELA_RELATION_RADIUS = 100;
+const VELA_RELATION_RADIUS = 150;
 const VELA_RELATION_RADIUS_SQ = VELA_RELATION_RADIUS * VELA_RELATION_RADIUS;
 const VELA_RELATION_MAX_TOTAL = 7200;
-const VELA_RELATION_MIN_STRENGTH = 0.022;
+const VELA_RELATION_MIN_STRENGTH = 0.012;
 const VELA_RELATION_SPRING = .019;
 const VELA_RELATION_TARGET_DISTANCE = 42;
 const VELA_RELATION_TARGET_SWING = 26;
 const VELA_RELATION_BRAID_FORCE = 0.018;
 const VELA_RELATION_VELOCITY_DAMPING = 0.024;
-const VELA_RELATION_LINE_ALPHA = 190;
+const VELA_RELATION_LINE_ALPHA = 245;
 const VELA_RELATION_PULSE_RATE = 0.0055;
 const VELA_RELATION_PHASE_RATE = 0.0027;
-const VELA_RELATION_DRAW_MAX_LENGTH = 132;
-const VELA_RELATION_DECAY_HALF_LIFE_MS = 7600;
-const VELA_RELATION_RESIDUAL_FLOOR = 0.012;
+const VELA_RELATION_DRAW_MAX_LENGTH = 264;
+const VELA_RELATION_DECAY_HALF_LIFE_MS = 18000;
+const VELA_RELATION_RESIDUAL_FLOOR = 0.03;
 const VELA_RELATION_BLEND = 0.38;
 const SUN_FIELD_FALLOFF = 0.00002;
 const SUN_FORCE_SCALE = 0.42;
@@ -108,21 +107,17 @@ const SUN_STROKE_DAY = [255, 255, 255];
 const GUIDE_WARM_DAY = [255, 64, 48];
 const GUIDE_COOL_DAY = [0, 136, 255];
 const GUIDE_LAYER_DAY = [0, 255, 128];
-const DAY_START_HOUR = 8;
-const DAY_END_HOUR = 18;
-const NIGHT_START_HOUR = 20;
-const NIGHT_END_HOUR = 6;
-const GUIDE_ARC_SWAY_RATE = 0.0012;
-const GUIDE_ARC_SWAY_PIXELS = 9;
+const GUIDE_ARC_SWAY_RATE = 0.0018;
+const GUIDE_ARC_SWAY_PIXELS = 14;
 const GUIDE_CENTER_WINDOW_RADIUS = 0.28;
 const GUIDE_CENTER_SNAP_STEP = 16;
-const GUIDE_CENTER_SNAP_BLEND = 0.9;
+const GUIDE_CENTER_SNAP_BLEND = 0.42;
 const GUIDE_CENTER_CLICK_THRESHOLD = 0.22;
 const RELATION_ARC_SWAY_RATE = 0.0022;
 const RELATION_ARC_SWAY_PIXELS = 8;
 const GUIDE_NODE_DENSITY_NORM = 1.4;
 const GUIDE_SCALE_SMOOTHING = 0.34;
-const SCAFFOLD_RED = [255, 56, 56];
+const SCAFFOLD_RED = [205, 205, 205];
 const SCAFFOLD_EDGE_ALPHA = 148;
 const SCAFFOLD_INSET_ALPHA = 98;
 const SCAFFOLD_STRUT_ALPHA = 76;
@@ -211,43 +206,19 @@ function initializeHelios() {
 }
 
 function refreshVisualTheme() {
-  let hour = localHourFloat();
-  let logoDayFactor = dayColorFactor(hour);
   visualTheme = createVisualTheme();
-  syncLogoTheme(logoDayFactor);
+  syncLogoTheme();
 }
 
-function syncLogoTheme(dayFactor) {
+function syncLogoTheme() {
   if (!centerLogoElement) return;
-  let logoInvert = 1 - dayFactor;
-  centerLogoElement.style.setProperty('--logo-invert', logoInvert.toFixed(3));
-}
-
-function localHourFloat() {
-  let now = new Date();
-  return now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
-}
-
-function dayColorFactor(hour) {
-  if (hour >= DAY_START_HOUR && hour <= DAY_END_HOUR) return 1;
-  if (hour >= NIGHT_START_HOUR || hour <= NIGHT_END_HOUR) return 0;
-  if (hour > NIGHT_END_HOUR && hour < DAY_START_HOUR) {
-    let t = (hour - NIGHT_END_HOUR) / (DAY_START_HOUR - NIGHT_END_HOUR);
-    return smoothstep(t);
-  }
-  let t = (hour - DAY_END_HOUR) / (NIGHT_START_HOUR - DAY_END_HOUR);
-  return 1 - smoothstep(t);
-}
-
-function smoothstep(t) {
-  let x = constrain(t, 0, 1);
-  return x * x * (3 - 2 * x);
+  centerLogoElement.style.setProperty('--logo-invert', (205 / 255).toFixed(3));
 }
 
 function createVisualTheme() {
   return {
-    dayFactor: 0,
-    background: [...BACKGROUND_NIGHT],
+    dayFactor: 1,
+    background: [...BACKGROUND_DAY],
     trailWarm: [...TRAIL_WARM_DAY],
     trailCool: [...TRAIL_COOL_DAY],
     bodyWarm: [...BODY_WARM_DAY],
@@ -257,20 +228,6 @@ function createVisualTheme() {
     guideCool: [...GUIDE_COOL_DAY],
     guideLayer: [...GUIDE_LAYER_DAY]
   };
-}
-
-function colorByDayFactor(dayRgb, dayFactor, nightOverride = null) {
-  let gray = luminance(dayRgb);
-  let nightBase = nightOverride || [gray, gray, gray];
-  return [
-    lerp(nightBase[0], dayRgb[0], dayFactor),
-    lerp(nightBase[1], dayRgb[1], dayFactor),
-    lerp(nightBase[2], dayRgb[2], dayFactor)
-  ];
-}
-
-function luminance(rgb) {
-  return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
 }
 
 function applyPixelDensity() {
@@ -1349,18 +1306,7 @@ function drawGuideSegment(aProj, bProj, layerNorm, isDepthBridge = false, seed =
   let weight = isDepthBridge ? 0.9 : 1.1;
   weight *= (aProj.scale + bProj.scale) * 0.5;
   weight *= 0.75 + strength * 0.65;
-  let lerpT = isDepthBridge ? 0.65 : 0.5;
-  let lineColor = isDepthBridge
-    ? [
-      lerp(visualTheme.guideCool[0], visualTheme.guideLayer[0], lerpT),
-      lerp(visualTheme.guideCool[1], visualTheme.guideLayer[1], lerpT),
-      lerp(visualTheme.guideCool[2], visualTheme.guideLayer[2], lerpT)
-    ]
-    : [
-      lerp(visualTheme.guideWarm[0], visualTheme.guideCool[0], lerpT),
-      lerp(visualTheme.guideWarm[1], visualTheme.guideCool[1], lerpT),
-      lerp(visualTheme.guideWarm[2], visualTheme.guideCool[2], lerpT)
-    ];
+  let lineColor = SCAFFOLD_RED;
 
   stroke(lineColor[0], lineColor[1], lineColor[2], alpha);
   strokeWeight(weight);
@@ -1400,13 +1346,10 @@ function applyCenterWindowGuideSnap(proj, seed = 0) {
   let quantY = Math.round(localY / GUIDE_CENTER_SNAP_STEP) * GUIDE_CENTER_SNAP_STEP;
   let clickThreshold = GUIDE_CENTER_SNAP_STEP * (GUIDE_CENTER_CLICK_THRESHOLD + zoneT * 0.2);
   let blend = GUIDE_CENTER_SNAP_BLEND * zoneT;
-
-  let snappedX = abs(quantX - localX) <= clickThreshold
-    ? quantX
-    : lerp(localX, quantX, blend);
-  let snappedY = abs(quantY - localY) <= clickThreshold
-    ? quantY
-    : lerp(localY, quantY, blend);
+  let xInfluence = 1 - constrain(abs(quantX - localX) / max(clickThreshold, 0.0001), 0, 1);
+  let yInfluence = 1 - constrain(abs(quantY - localY) / max(clickThreshold, 0.0001), 0, 1);
+  let snappedX = lerp(localX, quantX, blend * xInfluence);
+  let snappedY = lerp(localY, quantY, blend * yInfluence);
 
   return {
     ...proj,
@@ -1454,18 +1397,14 @@ function drawVelaRelations(projectionByVela) {
     let cx = midX + nx * bend;
     let cy = midY + ny * bend;
 
-    let samePolarity = relation.a.polarity === relation.b.polarity;
-    let relationColor = samePolarity
-      ? [
-        lerp(visualTheme.trailCool[0], visualTheme.guideCool[0], 0.5),
-        lerp(visualTheme.trailCool[1], visualTheme.guideCool[1], 0.5),
-        lerp(visualTheme.trailCool[2], visualTheme.guideCool[2], 0.5)
-      ]
-      : [
-        lerp(visualTheme.trailWarm[0], visualTheme.guideWarm[0], 0.5),
-        lerp(visualTheme.trailWarm[1], visualTheme.guideWarm[1], 0.5),
-        lerp(visualTheme.trailWarm[2], visualTheme.guideWarm[2], 0.5)
-      ];
+    let relationColor = relation.a.groupColor || (relation.a.polarity > 0 ? visualTheme.bodyWarm : visualTheme.bodyCool);
+    noStroke();
+    fill(relationColor[0], relationColor[1], relationColor[2], alpha * 0.24);
+    beginShape();
+    vertex(startX, startY);
+    quadraticVertex(cx, cy, endX, endY);
+    endShape(CLOSE);
+
     stroke(relationColor[0], relationColor[1], relationColor[2], alpha);
     strokeWeight(weight);
     noFill();
@@ -1527,7 +1466,7 @@ function drawProjectedBody(body, projection) {
     let bodyColor = body.groupColor || (body.polarity > 0 ? visualTheme.bodyWarm : visualTheme.bodyCool);
     stroke(bodyColor[0], bodyColor[1], bodyColor[2]);
     strokeWeight(1);
-    noFill();
+    fill(0, 0, 0);
   }
   ellipse(0, 0, body.r * 2);
   drawingContext.globalAlpha = prevAlpha;
