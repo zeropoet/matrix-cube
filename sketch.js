@@ -1524,9 +1524,10 @@ function drawProjectedBody(body, projection) {
     strokeWeight(1);
     noFill();
   } else {
-    noStroke();
     let bodyColor = body.groupColor || (body.polarity > 0 ? visualTheme.bodyWarm : visualTheme.bodyCool);
-    fill(bodyColor[0], bodyColor[1], bodyColor[2]);
+    stroke(bodyColor[0], bodyColor[1], bodyColor[2]);
+    strokeWeight(1);
+    noFill();
   }
   ellipse(0, 0, body.r * 2);
   drawingContext.globalAlpha = prevAlpha;
