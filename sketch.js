@@ -14,16 +14,17 @@ let heliosMeta = {
 
 const VELA_GROUPS = [
   { name: 'Import Modules', count: 9 },
+  { name: 'Composition 1', count: 100 },
   { name: 'The Library', count: 4 },
   { name: 'The Archive', count: 50 },
   { name: 'The Stacks', count: 10 },
   { name: 'The Something', count: 2 },
   { name: 'A.Lion', count: 6 },
-  { name: 'The Ovel Node', count: 7 },
+  { name: 'The Ovel Node', count: 8 },
   { name: 'Pæce', count: 3 },
   { name: 'The Ritual', count: 15 },
   { name: 'RWL', count: 33 },
-  { name: 'Hært', count: 40 },
+  { name: 'Hært', count: 41 },
   { name: 'The Void Architecture', count: 43 }
 ];
 const VELA_GROUP_COLORS = {
